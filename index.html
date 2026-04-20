@@ -4,175 +4,135 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cinerune</title>
-    <meta
-      name="description"
-      content="Cinerune - private family streaming hub with synced progress and smooth playback"
-    />
+    <meta name="description" content="Cinerune streaming home" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
-    <div class="ambient" aria-hidden="true"></div>
+  <body class="home-body">
+    <div class="home-atmosphere" aria-hidden="true"></div>
 
-    <header class="topbar">
-      <div class="brand-wrap">
-        <div class="brand-row">
-          <h1 class="brand">Cinerune</h1>
-          <span class="pill">Family Mode</span>
-        </div>
-        <p class="tagline">A clean home for movies, series, and synced progress</p>
-      </div>
-      <div class="topbar-actions">
-        <button id="toggleAuth" class="btn btn-ghost" type="button">Login</button>
-        <button id="toggleSettings" class="btn btn-ghost" type="button">Settings</button>
-      </div>
+    <header class="home-topbar">
+      <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
+
+      <nav class="home-nav" aria-label="Main navigation">
+        <a href="#continueSection">Continue Watching</a>
+        <a href="#recommendedSection">Recommended</a>
+        <a href="#latestMoviesSection">Latest Movies</a>
+      </nav>
+
+      <button id="toggleAuth" class="pill-btn" type="button">Account</button>
     </header>
 
-    <section class="auth-drawer" id="authPanel" hidden>
-      <div class="auth-head">
+    <section class="account-panel" id="authPanel" hidden>
+      <div class="account-grid" id="signedOutView">
         <h2>Account</h2>
-        <p>Sign in with username or email to sync across all devices.</p>
-      </div>
-
-      <div id="signedOutView">
-        <div class="auth-grid">
-          <label class="field">
-            <span>Username or Email</span>
-            <input id="authIdentifier" type="text" placeholder="mysticz or you@email.com" />
-          </label>
-          <label class="field">
-            <span>Password</span>
-            <input id="authPassword" type="password" placeholder="At least 6 characters" />
-          </label>
+        <label>
+          <span>Username or Email</span>
+          <input id="authIdentifier" type="text" placeholder="username or email" />
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="authPassword" type="password" placeholder="password" />
+        </label>
+        <div class="account-actions">
+          <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
+          <button id="signUpBtn" class="pill-btn ghost" type="button">Create Account</button>
         </div>
-        <div class="auth-buttons">
-          <button id="signInBtn" class="btn" type="button">Sign In</button>
-          <button id="signUpBtn" class="btn btn-ghost" type="button">Create Account</button>
-        </div>
-        <p class="muted" id="authHint">Set Supabase keys in config.js to enable login.</p>
+        <p id="authHint" class="tiny muted">Set Supabase values in config.js to enable sync.</p>
       </div>
 
       <div id="signedInView" hidden>
-        <p class="muted">Signed in as <strong id="authUserEmail">-</strong></p>
-        <div class="auth-buttons">
-          <button id="syncNowBtn" class="btn" type="button">Sync Now</button>
-          <button id="signOutBtn" class="btn btn-ghost" type="button">Sign Out</button>
+        <p class="tiny">Signed in as <strong id="authUserEmail">-</strong></p>
+        <div class="account-actions">
+          <button id="syncNowBtn" class="pill-btn" type="button">Sync Now</button>
+          <button id="signOutBtn" class="pill-btn ghost" type="button">Sign Out</button>
         </div>
+
+        <section class="folder-section">
+          <h3>My Lists</h3>
+          <div class="folder-grid">
+            <article class="folder-card">
+              <h4>Watching</h4>
+              <div id="folderWatching" class="folder-list"></div>
+            </article>
+            <article class="folder-card">
+              <h4>Watched</h4>
+              <div id="folderWatched" class="folder-list"></div>
+            </article>
+            <article class="folder-card">
+              <h4>Plan to Watch</h4>
+              <div id="folderPlan" class="folder-list"></div>
+            </article>
+            <article class="folder-card">
+              <h4>Dropped</h4>
+              <div id="folderDropped" class="folder-list"></div>
+            </article>
+          </div>
+        </section>
       </div>
     </section>
 
-    <main class="app-layout">
-      <section class="panel home-panel">
-        <div class="home-head">
-          <h2>Home</h2>
-          <input id="searchInput" type="search" placeholder="Search movies or shows..." />
+    <main class="home-shell">
+      <section id="heroSection" class="home-hero">
+        <div class="hero-shade"></div>
+        <div class="hero-copy">
+          <p id="heroType" class="tiny">Featured</p>
+          <h1 id="heroTitle">Loading...</h1>
+          <p id="heroMeta"></p>
+          <p id="heroDesc"></p>
+          <button id="heroWatchBtn" class="watch-btn" type="button">Watch Now</button>
         </div>
-
-        <section id="continueSection" class="home-section" hidden>
-          <div class="section-head">
-            <h3>Continue Watching</h3>
-            <p>Jump back in one tap</p>
-          </div>
-          <div id="continueGrid" class="continue-grid"></div>
-        </section>
-
-        <section class="home-section">
-          <div class="section-head">
-            <h3>Recommended For You</h3>
-            <p>Quick picks from your library</p>
-          </div>
-          <div id="recommendedGrid" class="card-grid"></div>
-        </section>
-
-        <section class="home-section">
-          <div class="section-head">
-            <h3>Trending Movies</h3>
-            <p>Popular movie picks</p>
-          </div>
-          <div id="movieGrid" class="card-grid"></div>
-        </section>
-
-        <section class="home-section">
-          <div class="section-head">
-            <h3>Popular Series</h3>
-            <p>Binge-worthy shows</p>
-          </div>
-          <div id="tvGrid" class="card-grid"></div>
-        </section>
       </section>
 
-      <section class="panel player-panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Now Playing</p>
-            <h2 id="playerTitle">Pick something from Home</h2>
-          </div>
-          <div id="playerMeta" class="player-meta"></div>
+      <section id="continueSection" class="home-row" hidden>
+        <div class="row-head">
+          <h2>Continue Watching</h2>
         </div>
-        <p id="statusLine" class="status">Ready.</p>
-        <div class="player-shell">
-          <iframe
-            id="playerFrame"
-            title="Vidking Player"
-            loading="lazy"
-            referrerpolicy="origin"
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowfullscreen
-          ></iframe>
-        </div>
-
-        <section class="panel controls-panel" id="settingsPanel" hidden>
-          <h3>Playback Settings</h3>
-
-          <label class="field">
-            <span>Primary Player Color</span>
-            <input id="colorInput" type="text" value="0dcaf0" maxlength="6" />
-            <small>Hex without #, e.g. e50914</small>
-          </label>
-
-          <div class="checks">
-            <label><input id="autoplayInput" type="checkbox" /> Auto play</label>
-            <label><input id="nextEpisodeInput" type="checkbox" checked /> Vidking next episode</label>
-            <label><input id="episodeSelectorInput" type="checkbox" checked /> Episode selector</label>
-            <label><input id="autoNextSmartInput" type="checkbox" checked /> Cinerune smart auto-next</label>
-          </div>
-
-          <button id="saveSettingsBtn" class="btn" type="button">Save Settings</button>
-          <p class="muted" id="cloudState">Cloud sync: off</p>
-        </section>
+        <div id="continueGrid" class="poster-row"></div>
       </section>
+
+      <section id="recommendedSection" class="home-row">
+        <div class="row-head">
+          <h2>Recommended</h2>
+          <div class="filter-chips">
+            <button id="showRecommendedAll" class="chip active" type="button">All</button>
+            <button id="showRecommendedMovies" class="chip" type="button">Movies</button>
+            <button id="showRecommendedTv" class="chip" type="button">TV Series</button>
+          </div>
+        </div>
+        <div id="recommendedGrid" class="poster-grid"></div>
+      </section>
+
+      <section id="latestMoviesSection" class="home-row">
+        <div class="row-head">
+          <h2>Latest Movies</h2>
+          <input id="searchInput" class="search-input" type="search" placeholder="Search titles..." />
+        </div>
+        <div id="latestMoviesGrid" class="poster-row"></div>
+      </section>
+
+      <p id="statusLine" class="tiny muted">Loading library...</p>
+      <p id="cloudState" class="tiny muted">Cloud sync: off</p>
     </main>
 
-    <template id="cardTemplate">
-      <article class="card">
-        <button class="card-btn" type="button">
-          <img class="poster" alt="" loading="lazy" decoding="async" />
-          <div class="card-body">
-            <h3 class="title"></h3>
-            <p class="meta"></p>
-          </div>
-        </button>
-      </article>
-    </template>
-
-    <template id="continueTemplate">
-      <article class="continue-card">
-        <button class="continue-btn" type="button">
-          <img class="continue-poster" alt="" loading="lazy" decoding="async" />
-          <div class="continue-body">
-            <h4 class="continue-title"></h4>
-            <p class="continue-meta"></p>
+    <template id="posterCardTemplate">
+      <article class="poster-card">
+        <button class="poster-btn" type="button">
+          <img class="poster-img" alt="" loading="lazy" decoding="async" />
+          <span class="badge-hd">HD</span>
+          <div class="poster-meta">
+            <h4 class="poster-title"></h4>
+            <p class="poster-sub"></p>
           </div>
         </button>
       </article>
     </template>
 
     <script src="config.js"></script>
+    <script src="config.local.js"></script>
     <script type="module" src="app.js"></script>
   </body>
 </html>

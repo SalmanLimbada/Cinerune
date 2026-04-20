@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Watch | Cinerune</title>
+    <meta name="description" content="Cinerune watch page" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="watch-body">
+    <div class="watch-atmosphere" aria-hidden="true"></div>
+
+    <header class="watch-topbar">
+      <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
+      <nav class="watch-nav">
+        <a href="./index.html#recommendedSection">Movies</a>
+        <a href="./index.html#recommendedSection">TV-Series</a>
+        <a href="./index.html#latestMoviesSection">Updates</a>
+      </nav>
+      <a class="pill-btn ghost" href="./index.html">Home</a>
+    </header>
+
+    <main class="watch-shell">
+      <section class="watch-main-card">
+        <div class="player-shell">
+          <iframe
+            id="playerFrame"
+            title="Cinerune Player"
+            loading="lazy"
+            referrerpolicy="origin"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+        </div>
+
+        <div class="player-controls">
+          <div class="left-controls">
+            <label><input id="autoplayInput" type="checkbox" /> Auto Play</label>
+            <label><input id="autoNextSmartInput" type="checkbox" checked /> Auto Next</label>
+            <button id="prevEpisodeBtn" class="control-btn" type="button">Prev</button>
+            <button id="nextEpisodeBtn" class="control-btn" type="button">Next</button>
+          </div>
+
+          <div class="right-controls">
+            <div class="dropdown" id="bookmarkDropdown">
+              <button id="bookmarkTrigger" class="control-btn" type="button">Bookmark</button>
+              <div id="bookmarkMenu" class="dropdown-menu" hidden>
+                <button class="bookmark-option" data-status="watching" type="button">Watching</button>
+                <button class="bookmark-option" data-status="watched" type="button">Watched</button>
+                <button class="bookmark-option" data-status="plan" type="button">Plan to Watch</button>
+                <button class="bookmark-option" data-status="dropped" type="button">Dropped</button>
+              </div>
+            </div>
+            <button id="reportTrigger" class="control-btn" type="button">Report</button>
+          </div>
+        </div>
+
+        <p id="watchStatus" class="tiny muted">If playback fails, switch server.</p>
+
+        <div class="server-row">
+          <button id="server1Btn" class="server-btn active" type="button">Server 1</button>
+          <button id="server2Btn" class="server-btn" type="button">Server 2</button>
+        </div>
+
+        <section id="tvControls" class="season-block" hidden>
+          <div class="row-head compact">
+            <h3>Season</h3>
+            <select id="seasonSelect"></select>
+          </div>
+          <p id="episodeCountText" class="tiny muted"></p>
+          <div class="episode-row">
+            <select id="episodeSelect"></select>
+            <button id="playSelectedBtn" class="pill-btn" type="button">Play Episode</button>
+          </div>
+        </section>
+
+        <section class="home-row related-row">
+          <div class="row-head">
+            <h2>You may also like</h2>
+            <div>
+              <button id="relatedPrevBtn" class="arrow-btn" type="button">&#8592;</button>
+              <button id="relatedNextBtn" class="arrow-btn" type="button">&#8594;</button>
+            </div>
+          </div>
+          <div id="relatedRail" class="poster-row"></div>
+        </section>
+      </section>
+
+      <aside class="watch-side-card">
+        <img id="sidePoster" class="side-poster" alt="Poster" loading="lazy" decoding="async" />
+        <p id="watchTagline" class="tiny muted"></p>
+        <h2 id="watchTitle">Loading...</h2>
+        <div id="watchMeta" class="watch-badges"></div>
+        <p id="sidePlot" class="tiny muted"></p>
+        <p id="sideType" class="tiny muted"></p>
+        <p id="sideGenre" class="tiny muted"></p>
+        <p id="sideRuntime" class="tiny muted"></p>
+        <p id="sideProgress" class="tiny muted"></p>
+        <div class="rating-block">
+          <p class="stars" id="ratingStars">☆☆☆☆☆</p>
+          <p id="sideRating" class="tiny"></p>
+        </div>
+
+        <button id="syncNowBtn" class="pill-btn" type="button">Sync Now</button>
+      </aside>
+    </main>
+
+    <dialog id="reportDialog" class="report-dialog">
+      <form id="reportForm" method="dialog">
+        <h3>Send Report</h3>
+        <p class="tiny muted">Tell us what is wrong with this title or stream.</p>
+        <textarea id="reportMessage" rows="4" placeholder="Describe the issue"></textarea>
+        <div class="account-actions">
+          <button id="cancelReport" class="pill-btn ghost" value="cancel" type="button">Cancel</button>
+          <button class="pill-btn" value="submit" type="submit">Send Report</button>
+        </div>
+      </form>
+    </dialog>
+
+    <input id="colorInput" type="hidden" value="45b7ff" />
+    <input id="nextEpisodeInput" type="hidden" />
+    <button id="saveSettingsBtn" type="button" hidden>Save</button>
+
+    <script src="config.js"></script>
+    <script src="config.local.js"></script>
+    <script type="module" src="watch.js"></script>
+  </body>
+</html>
