@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cinerune</title>
+    <meta
+      name="description"
+      content="Cinerune - private family streaming launcher with synced progress and Vidking embeds"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="ambient" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div>
+        <div class="brand-row">
+          <h1 class="brand">Cinerune</h1>
+          <span class="pill">Family Mode</span>
+        </div>
+        <p class="tagline">Personal streaming launcher with cloud resume sync</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="toggleSettings" class="btn btn-ghost" type="button">Settings</button>
+        <button id="toggleAuth" class="btn btn-ghost" type="button">Login</button>
+      </div>
+    </header>
+
+    <section class="auth-drawer" id="authPanel" hidden>
+      <div class="auth-head">
+        <h2>Account</h2>
+        <p>Login to sync progress across phones, TVs, and laptops.</p>
+      </div>
+
+      <div id="signedOutView">
+        <div class="auth-grid">
+          <label class="field">
+            <span>Email</span>
+            <input id="authEmail" type="email" placeholder="family@email.com" />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="authPassword" type="password" placeholder="At least 6 characters" />
+          </label>
+        </div>
+        <div class="auth-buttons">
+          <button id="signInBtn" class="btn" type="button">Sign In</button>
+          <button id="signUpBtn" class="btn btn-ghost" type="button">Create Account</button>
+        </div>
+        <p class="muted" id="authHint">Set Supabase keys in config.js to enable login.</p>
+      </div>
+
+      <div id="signedInView" hidden>
+        <p class="muted">Signed in as <strong id="authUserEmail">-</strong></p>
+        <div class="auth-buttons">
+          <button id="syncNowBtn" class="btn" type="button">Sync Now</button>
+          <button id="signOutBtn" class="btn btn-ghost" type="button">Sign Out</button>
+        </div>
+      </div>
+    </section>
+
+    <main class="layout">
+      <section class="panel player-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Now Playing</p>
+            <h2 id="playerTitle">Pick something to watch</h2>
+          </div>
+          <div id="playerMeta" class="player-meta"></div>
+        </div>
+        <div class="player-shell">
+          <iframe
+            id="playerFrame"
+            title="Vidking Player"
+            loading="lazy"
+            referrerpolicy="origin"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+        </div>
+      </section>
+
+      <section class="panel controls-panel" id="settingsPanel" hidden>
+        <h3>Settings</h3>
+
+        <label class="field">
+          <span>TMDB API Key (optional)</span>
+          <input id="apiKeyInput" type="password" placeholder="Paste TMDB API key" />
+          <small>Used for search/trending metadata. Saved only on this device.</small>
+        </label>
+
+        <label class="field">
+          <span>Primary player color</span>
+          <input id="colorInput" type="text" value="0dcaf0" maxlength="6" />
+          <small>Hex without #, e.g. e50914</small>
+        </label>
+
+        <div class="checks">
+          <label><input id="autoplayInput" type="checkbox" /> Auto play</label>
+          <label><input id="nextEpisodeInput" type="checkbox" checked /> Next episode</label>
+          <label><input id="episodeSelectorInput" type="checkbox" checked /> Episode selector</label>
+          <label><input id="autoNextSmartInput" type="checkbox" checked /> Smart auto-next episode (app-level)</label>
+        </div>
+
+        <button id="saveSettingsBtn" class="btn" type="button">Save Settings</button>
+        <p class="muted" id="cloudState">Cloud sync: off</p>
+      </section>
+
+      <section class="panel browse-panel">
+        <div class="browse-head">
+          <div class="tabs" role="tablist" aria-label="Media type">
+            <button class="tab active" data-type="movie" role="tab" aria-selected="true">Movies</button>
+            <button class="tab" data-type="tv" role="tab" aria-selected="false">TV Shows</button>
+          </div>
+
+          <div class="search-wrap">
+            <input id="searchInput" type="search" placeholder="Search title..." />
+          </div>
+        </div>
+
+        <p id="statusLine" class="status">Loading content...</p>
+
+        <div id="manualLaunch" class="manual-launch">
+          <h3>Quick Launch by TMDB ID</h3>
+          <div class="manual-grid">
+            <input id="manualId" type="number" min="1" placeholder="TMDB ID" />
+            <input id="manualSeason" type="number" min="1" placeholder="Season (TV)" value="1" />
+            <input id="manualEpisode" type="number" min="1" placeholder="Episode (TV)" value="1" />
+            <button id="manualPlayBtn" class="btn" type="button">Play</button>
+          </div>
+        </div>
+
+        <div id="continueWrap" class="continue-wrap" hidden>
+          <h3>Continue Watching</h3>
+          <div id="continueGrid" class="continue-grid"></div>
+        </div>
+
+        <div id="results" class="card-grid"></div>
+      </section>
+    </main>
+
+    <template id="cardTemplate">
+      <article class="card">
+        <button class="card-btn" type="button">
+          <img class="poster" alt="" loading="lazy" decoding="async" />
+          <div class="card-body">
+            <h3 class="title"></h3>
+            <p class="meta"></p>
+          </div>
+        </button>
+      </article>
+    </template>
+
+    <script src="config.js"></script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
