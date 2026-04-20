@@ -68,14 +68,14 @@ with check (auth.uid() = user_id);
 3. In Supabase, go to Project Settings > API
 4. Copy:
 - Project URL
-- Anon public key
+- Publishable key
 
 5. Open config.js and fill values:
 
 ```js
 window.CINERUNE_CONFIG = {
   supabaseUrl: "https://YOUR-PROJECT.supabase.co",
-  supabaseAnonKey: "YOUR_ANON_KEY"
+  supabasePublishableKey: "YOUR_PUBLISHABLE_KEY"
 };
 ```
 
@@ -111,5 +111,5 @@ Open http://localhost:5500
 ## Notes
 
 - This app is for authorized personal/family use only.
-- Keep the Supabase anon key in config.js (public key is expected to be public).
+- Keep the Supabase publishable key in config.js (public key is expected to be public).
 - Do not put any secret service-role key in frontend files.

@@ -171,16 +171,18 @@ function togglePanel(panel) {
 async function initAuth() {
   const config = window.CINERUNE_CONFIG || {};
   const supabaseUrl = String(config.supabaseUrl || "").trim();
-  const supabaseAnonKey = String(config.supabaseAnonKey || "").trim();
+  const supabasePublishableKey = String(
+    config.supabasePublishableKey || config.supabaseAnonKey || ""
+  ).trim();
 
-  if (!supabaseUrl || !supabaseAnonKey) {
+  if (!supabaseUrl || !supabasePublishableKey) {
     el.authHint.textContent = "Set Supabase values in config.js to enable account sync.";
     updateCloudState("Cloud sync: off (missing config)");
     return;
   }
 
   try {
-    state.supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    state.supabase = createClient(supabaseUrl, supabasePublishableKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true

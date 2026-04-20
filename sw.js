@@ -1,4 +1,4 @@
-const STATIC_CACHE = "cinerune-static-v1";
+const STATIC_CACHE = "cinerune-static-v2";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./config.js"];
 
 self.addEventListener("install", (event) => {
@@ -28,6 +28,22 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
 
   if (url.origin === self.location.origin) {
+    const appShellPaths = new Set(["/", "/index.html", "/styles.css", "/app.js", "/config.js"]);
+    const networkFirst = appShellPaths.has(url.pathname);
+
+    if (networkFirst) {
+      event.respondWith(
+        fetch(request)
+          .then((response) => {
+            const copy = response.clone();
+            caches.open(STATIC_CACHE).then((cache) => cache.put(request, copy));
+            return response;
+          })
+          .catch(() => caches.match(request))
+      );
+      return;
+    }
+
     event.respondWith(
       caches.match(request).then((cached) => {
         const network = fetch(request)
