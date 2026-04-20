@@ -176,7 +176,7 @@ async function initAuth() {
   ).trim();
 
   if (!supabaseUrl || !supabasePublishableKey) {
-    el.authHint.textContent = "Set Supabase values in config.js to enable account sync.";
+    setAuthHint("Set Supabase values in config.js to enable account sync.", true);
     updateCloudState("Cloud sync: off (missing config)");
     return;
   }
@@ -212,6 +212,7 @@ async function initAuth() {
     }
   } catch (error) {
     console.error("Supabase init failed", error);
+    setAuthHint("Supabase init failed. Check URL/key and try refresh.", true);
     updateCloudState("Cloud sync: error");
   }
 }
@@ -226,14 +227,17 @@ function renderAuthUI() {
 
   if (signedIn) {
     el.authUserEmail.textContent = user.email || user.id;
+    setAuthHint("Signed in. Progress sync is active.");
     updateCloudState("Cloud sync: connected");
   } else {
+    setAuthHint(state.cloudEnabled ? "Ready. Sign in or create account." : "Set Supabase values in config.js to enable account sync.", !state.cloudEnabled);
     updateCloudState(state.cloudEnabled ? "Cloud sync: configured (login required)" : "Cloud sync: off");
   }
 }
 
 async function signIn() {
   if (!state.supabase) {
+    setAuthHint("Cloud auth is not configured in config.js.", true);
     setStatus("Cloud auth is not configured in config.js.");
     return;
   }
@@ -241,22 +245,33 @@ async function signIn() {
   const email = el.authEmail.value.trim();
   const password = el.authPassword.value;
   if (!email || !password) {
+    setAuthHint("Enter email and password.", true);
     setStatus("Enter email and password.");
     return;
   }
 
-  const { error } = await state.supabase.auth.signInWithPassword({ email, password });
-  if (error) {
-    setStatus(`Sign in failed: ${error.message}`);
-    return;
-  }
+  try {
+    setAuthHint("Signing in...");
+    const { error } = await state.supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      setAuthHint(`Sign in failed: ${error.message}`, true);
+      setStatus(`Sign in failed: ${error.message}`);
+      return;
+    }
 
-  setStatus("Signed in. Syncing cloud progress...");
-  await pullCloudProgress();
+    setAuthHint("Signed in. Syncing cloud progress...");
+    setStatus("Signed in. Syncing cloud progress...");
+    await pullCloudProgress();
+  } catch (error) {
+    const message = error?.message || "Unexpected sign in error";
+    setAuthHint(`Sign in failed: ${message}`, true);
+    setStatus(`Sign in failed: ${message}`);
+  }
 }
 
 async function signUp() {
   if (!state.supabase) {
+    setAuthHint("Cloud auth is not configured in config.js.", true);
     setStatus("Cloud auth is not configured in config.js.");
     return;
   }
@@ -264,26 +279,39 @@ async function signUp() {
   const email = el.authEmail.value.trim();
   const password = el.authPassword.value;
   if (!email || !password) {
+    setAuthHint("Enter email and password.", true);
     setStatus("Enter email and password.");
     return;
   }
 
-  const { error } = await state.supabase.auth.signUp({ email, password });
-  if (error) {
-    setStatus(`Sign up failed: ${error.message}`);
-    return;
-  }
+  try {
+    setAuthHint("Creating account...");
+    const { error } = await state.supabase.auth.signUp({ email, password });
+    if (error) {
+      setAuthHint(`Sign up failed: ${error.message}`, true);
+      setStatus(`Sign up failed: ${error.message}`);
+      return;
+    }
 
-  setStatus("Account created. Check your email if confirmation is enabled.");
+    const ok = "Account created. Check your email if confirmation is enabled.";
+    setAuthHint(ok);
+    setStatus(ok);
+  } catch (error) {
+    const message = error?.message || "Unexpected sign up error";
+    setAuthHint(`Sign up failed: ${message}`, true);
+    setStatus(`Sign up failed: ${message}`);
+  }
 }
 
 async function signOut() {
   if (!state.supabase) return;
   const { error } = await state.supabase.auth.signOut();
   if (error) {
+    setAuthHint(`Sign out failed: ${error.message}`, true);
     setStatus(`Sign out failed: ${error.message}`);
     return;
   }
+  setAuthHint("Signed out.");
   setStatus("Signed out.");
 }
 
@@ -690,6 +718,12 @@ function setStatus(message) {
 
 function updateCloudState(message) {
   el.cloudState.textContent = message;
+}
+
+function setAuthHint(message, isError = false) {
+  if (!el.authHint) return;
+  el.authHint.textContent = message;
+  el.authHint.style.color = isError ? "#b42318" : "";
 }
 
 function formatSeconds(value) {
