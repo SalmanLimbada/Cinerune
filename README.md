@@ -1,115 +1,61 @@
 # Cinerune
 
-Cinerune is a family-ready movie and TV launcher using Vidking embed URLs.
+Cinerune is a private, family-focused streaming hub built for smooth playback and simple cross-device progress sync.
 
-## New upgraded features
+## Project Overview
 
-- Public web deployment support (not limited to localhost)
-- Email/password login (Supabase Auth)
-- Cloud watch-progress sync across devices
-- Continue Watching from synced account data
-- Smart app-level auto-next episode option
-- Fast UI with lazy loading and service-worker cache
+Cinerune combines a curated home feed, embedded playback, and account-based watch continuity in a single lightweight web app.
 
-## 1) Put Cinerune online (free)
+### Core Experience
 
-Use Cloudflare Pages, Netlify, or Vercel. Easiest path:
+- Mobile-first home page with clear sections
+- Continue Watching at the top for instant resume
+- Curated movie and series rails for fast browsing
+- Embedded Vidking player with configurable playback options
+- Automatic progress tracking and account sync via Supabase
 
-### Netlify Drop (no CLI)
+### Account and Sync
 
-1. Open https://app.netlify.com/drop
-2. Drag this whole project folder into Netlify Drop
-3. Netlify gives you a public URL like `https://cinerune-xxxx.netlify.app`
-4. Share that URL with family devices
+- Sign up and sign in using username or email
+- Cloud progress is tied to user accounts
+- Resume state is preserved across phones, laptops, and TVs
+- Manual Sync Now action is available from the account panel
 
-Optional: connect a custom domain later.
+### Playback Behavior
 
-## 2) Enable login + progress sync (Supabase)
+- Supports movie and TV playback routes
+- Resume time is passed to player when available
+- Optional smart auto-next for TV episodes
+- Configurable color, autoplay, episode selector, and next-episode controls
 
-1. Create a free Supabase project at https://supabase.com
-2. In Supabase dashboard, open SQL Editor and run:
+## Architecture
 
-```sql
-create table if not exists public.watch_progress (
-  id bigint generated always as identity primary key,
-  user_id uuid not null,
-  media_type text not null check (media_type in ('movie', 'tv')),
-  content_id bigint not null,
-  season_number integer not null default 1,
-  episode_number integer not null default 1,
-  timestamp_seconds integer not null default 0,
-  duration_seconds integer not null default 0,
-  progress_percent numeric not null default 0,
-  updated_at timestamptz not null default now()
-);
+Cinerune is a static frontend application.
 
-create unique index if not exists watch_progress_unique
-on public.watch_progress (user_id, media_type, content_id, season_number, episode_number);
+### Files
 
-alter table public.watch_progress enable row level security;
+- index.html: Main app structure and UI sections
+- styles.css: Responsive styling and visual system
+- app.js: App state, auth, feed rendering, progress logic
+- config.js: Runtime configuration for Supabase URL and publishable key
+- sw.js: Service worker cache strategy for fast repeat loads
 
-create policy "users can read own progress"
-on public.watch_progress
-for select
-using (auth.uid() = user_id);
+### Integrations
 
-create policy "users can insert own progress"
-on public.watch_progress
-for insert
-with check (auth.uid() = user_id);
+- Supabase Auth: account session management
+- Supabase Postgres: watch_progress table for synced resume state
+- Vidking Embed: playback surface for movies and TV episodes
 
-create policy "users can update own progress"
-on public.watch_progress
-for update
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
-```
+## Design Goals
 
-3. In Supabase, go to Project Settings > API
-4. Copy:
-- Project URL
-- Publishable key
+- Fast and stable behavior on low and high-end mobile devices
+- Clear, minimal navigation with no unnecessary setup friction
+- Friendly family usage with simple login and reliable resume
+- Clean visual language with readable cards and obvious actions
 
-5. Open config.js and fill values:
+## Privacy and Security Notes
 
-```js
-window.CINERUNE_CONFIG = {
-  supabaseUrl: "https://YOUR-PROJECT.supabase.co",
-  supabasePublishableKey: "YOUR_PUBLISHABLE_KEY"
-};
-```
-
-6. Redeploy site (or re-upload folder in Netlify Drop)
-
-## 3) TMDB key for richer browsing
-
-Inside Cinerune app:
-1. Open Settings
-2. Paste TMDB API key
-3. Save Settings
-
-Without TMDB key, Quick Launch by TMDB ID still works.
-
-## 4) Auto-next episode options
-
-In Settings:
-- Next episode (Vidking UI option)
-- Smart auto-next episode (Cinerune app-level fallback)
-
-Turn on both for the Loklok-style flow.
-
-## Local testing (optional)
-
-Run a server before deployment:
-
-```bash
-python -m http.server 5500
-```
-
-Open http://localhost:5500
-
-## Notes
-
-- This app is for authorized personal/family use only.
-- Keep the Supabase publishable key in config.js (public key is expected to be public).
-- Do not put any secret service-role key in frontend files.
+- Uses Supabase publishable key in frontend configuration
+- Never uses secret keys in browser code
+- Progress data is protected by Row Level Security policies per user
+- Intended for authorized personal and family viewing usage

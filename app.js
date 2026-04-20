@@ -1,21 +1,25 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-const TMDB_BASE = "https://api.themoviedb.org/3";
-const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
 const VIDKING_BASE = "https://www.vidking.net/embed";
 
-const defaultFeatured = {
-  movie: [
-    { id: 872585, title: "Oppenheimer", release_date: "2023-07-19", poster_path: "/ptpr0kGAckfQkJeJIt8st5dglvd.jpg" },
-    { id: 693134, title: "Dune: Part Two", release_date: "2024-02-27", poster_path: "/8b8R8l88Qje9dn9OE8PY05Nxl1X.jpg" },
-    { id: 603692, title: "John Wick: Chapter 4", release_date: "2023-03-22", poster_path: "/vZloFAK7NmvMGKE7VkF5UHaz0I.jpg" }
-  ],
-  tv: [
-    { id: 1399, name: "Game of Thrones", first_air_date: "2011-04-17", poster_path: "/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg" },
-    { id: 94997, name: "House of the Dragon", first_air_date: "2022-08-21", poster_path: "/z2yahl2uefxDCl0nogcRBstwruJ.jpg" },
-    { id: 1396, name: "Breaking Bad", first_air_date: "2008-01-20", poster_path: "/3xnWaLQjelJDDF7LT1WBo6f4BRe.jpg" }
-  ]
-};
+const catalog = [
+  { id: 872585, mediaType: "movie", title: "Oppenheimer", year: 2023, poster: "https://image.tmdb.org/t/p/w500/ptpr0kGAckfQkJeJIt8st5dglvd.jpg", tags: ["recommended", "trending-movie"] },
+  { id: 693134, mediaType: "movie", title: "Dune: Part Two", year: 2024, poster: "https://image.tmdb.org/t/p/w500/8b8R8l88Qje9dn9OE8PY05Nxl1X.jpg", tags: ["recommended", "trending-movie"] },
+  { id: 603692, mediaType: "movie", title: "John Wick: Chapter 4", year: 2023, poster: "https://image.tmdb.org/t/p/w500/vZloFAK7NmvMGKE7VkF5UHaz0I.jpg", tags: ["trending-movie"] },
+  { id: 940721, mediaType: "movie", title: "Godzilla Minus One", year: 2023, poster: "https://image.tmdb.org/t/p/w500/hfTyu2VPBqLRPo2DauW8q7bh9bm.jpg", tags: ["recommended", "trending-movie"] },
+  { id: 346698, mediaType: "movie", title: "Barbie", year: 2023, poster: "https://image.tmdb.org/t/p/w500/iuFNMS8U5cb6xfzi51Dbkovj7vM.jpg", tags: ["trending-movie"] },
+  { id: 569094, mediaType: "movie", title: "Spider-Man: Across the Spider-Verse", year: 2023, poster: "https://image.tmdb.org/t/p/w500/8Vt6mWEReuy4Of61Lnj5Xj704m8.jpg", tags: ["recommended", "trending-movie"] },
+  { id: 447365, mediaType: "movie", title: "Guardians of the Galaxy Vol. 3", year: 2023, poster: "https://image.tmdb.org/t/p/w500/r2J02Z2OpNTctfOSN1Ydgii51I3.jpg", tags: ["trending-movie"] },
+  { id: 533535, mediaType: "movie", title: "Deadpool & Wolverine", year: 2024, poster: "https://image.tmdb.org/t/p/w500/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg", tags: ["recommended", "trending-movie"] },
+  { id: 1399, mediaType: "tv", title: "Game of Thrones", year: 2011, poster: "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", tags: ["recommended", "popular-tv"], season: 1, episode: 1 },
+  { id: 94997, mediaType: "tv", title: "House of the Dragon", year: 2022, poster: "https://image.tmdb.org/t/p/w500/z2yahl2uefxDCl0nogcRBstwruJ.jpg", tags: ["popular-tv"] },
+  { id: 1396, mediaType: "tv", title: "Breaking Bad", year: 2008, poster: "https://image.tmdb.org/t/p/w500/3xnWaLQjelJDDF7LT1WBo6f4BRe.jpg", tags: ["popular-tv", "recommended"] },
+  { id: 71446, mediaType: "tv", title: "Money Heist", year: 2017, poster: "https://image.tmdb.org/t/p/w500/reEMJA1uzscCbkpeRJeTT2bjqUp.jpg", tags: ["popular-tv"] },
+  { id: 60574, mediaType: "tv", title: "Peaky Blinders", year: 2013, poster: "https://image.tmdb.org/t/p/w500/vUUqzWa2LnHIVqkaKVlVGkVcZIW.jpg", tags: ["popular-tv", "recommended"] },
+  { id: 1398, mediaType: "tv", title: "The Sopranos", year: 1999, poster: "https://image.tmdb.org/t/p/w500/rTc7ZXdroqjkKivFPvCPX0Ru7uw.jpg", tags: ["popular-tv"] },
+  { id: 615, mediaType: "tv", title: "Futurama", year: 1999, poster: "https://image.tmdb.org/t/p/w500/5MwsjTfn6u7xW7vR7f6x9jvM2W2.jpg", tags: ["popular-tv"] },
+  { id: 60625, mediaType: "tv", title: "Rick and Morty", year: 2013, poster: "https://image.tmdb.org/t/p/w500/8kOWDBK6XlPUzckuHDo3wwVRFwt.jpg", tags: ["popular-tv", "recommended"] }
+];
 
 const settingsKey = "cinerune:settings";
 const progressKey = "cinerune:progress";
@@ -27,7 +31,7 @@ const el = {
   authPanel: document.getElementById("authPanel"),
   signedOutView: document.getElementById("signedOutView"),
   signedInView: document.getElementById("signedInView"),
-  authEmail: document.getElementById("authEmail"),
+  authIdentifier: document.getElementById("authIdentifier"),
   authPassword: document.getElementById("authPassword"),
   signInBtn: document.getElementById("signInBtn"),
   signUpBtn: document.getElementById("signUpBtn"),
@@ -36,33 +40,28 @@ const el = {
   authUserEmail: document.getElementById("authUserEmail"),
   authHint: document.getElementById("authHint"),
   cloudState: document.getElementById("cloudState"),
-  apiKeyInput: document.getElementById("apiKeyInput"),
   colorInput: document.getElementById("colorInput"),
   autoplayInput: document.getElementById("autoplayInput"),
   nextEpisodeInput: document.getElementById("nextEpisodeInput"),
   episodeSelectorInput: document.getElementById("episodeSelectorInput"),
   autoNextSmartInput: document.getElementById("autoNextSmartInput"),
   saveSettingsBtn: document.getElementById("saveSettingsBtn"),
-  tabs: [...document.querySelectorAll(".tab")],
   searchInput: document.getElementById("searchInput"),
   statusLine: document.getElementById("statusLine"),
-  results: document.getElementById("results"),
-  cardTemplate: document.getElementById("cardTemplate"),
   playerFrame: document.getElementById("playerFrame"),
   playerTitle: document.getElementById("playerTitle"),
   playerMeta: document.getElementById("playerMeta"),
-  manualId: document.getElementById("manualId"),
-  manualSeason: document.getElementById("manualSeason"),
-  manualEpisode: document.getElementById("manualEpisode"),
-  manualPlayBtn: document.getElementById("manualPlayBtn"),
-  continueWrap: document.getElementById("continueWrap"),
-  continueGrid: document.getElementById("continueGrid")
+  continueSection: document.getElementById("continueSection"),
+  continueGrid: document.getElementById("continueGrid"),
+  recommendedGrid: document.getElementById("recommendedGrid"),
+  movieGrid: document.getElementById("movieGrid"),
+  tvGrid: document.getElementById("tvGrid"),
+  cardTemplate: document.getElementById("cardTemplate"),
+  continueTemplate: document.getElementById("continueTemplate")
 };
 
 const state = {
-  mediaType: "movie",
   settings: readJson(settingsKey, {
-    apiKey: "",
     color: "0dcaf0",
     autoPlay: false,
     nextEpisode: true,
@@ -70,14 +69,13 @@ const state = {
     autoNextSmart: true
   }),
   progress: readJson(progressKey, {}),
-  searchTimer: null,
-  abortController: null,
   supabase: null,
   session: null,
   cloudEnabled: false,
   currentPlayback: null,
   syncTimer: null,
-  syncQueued: false
+  syncQueued: false,
+  searchTerm: ""
 };
 
 boot();
@@ -86,94 +84,286 @@ async function boot() {
   hydrateSettingsUI();
   bindEvents();
   await initAuth();
-  renderContinueWatching();
-  loadInitialContent();
+  renderHome();
   registerServiceWorker();
 }
 
 function bindEvents() {
-  el.toggleSettings.addEventListener("click", () => {
-    togglePanel(el.settingsPanel);
-  });
-
-  el.toggleAuth.addEventListener("click", () => {
-    togglePanel(el.authPanel);
-  });
+  el.toggleSettings.addEventListener("click", () => togglePanel(el.settingsPanel));
+  el.toggleAuth.addEventListener("click", () => togglePanel(el.authPanel));
 
   el.saveSettingsBtn.addEventListener("click", () => {
     state.settings = {
-      apiKey: el.apiKeyInput.value.trim(),
       color: sanitizeColor(el.colorInput.value),
       autoPlay: el.autoplayInput.checked,
       nextEpisode: el.nextEpisodeInput.checked,
       episodeSelector: el.episodeSelectorInput.checked,
       autoNextSmart: el.autoNextSmartInput.checked
     };
-
     localStorage.setItem(settingsKey, JSON.stringify(state.settings));
-    el.colorInput.value = state.settings.color;
-    setStatus("Settings saved. Reloading content...");
-    loadInitialContent();
-  });
-
-  el.tabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      if (state.mediaType === tab.dataset.type) return;
-      setMediaType(tab.dataset.type);
-      loadInitialContent();
-    });
+    setStatus("Settings saved.");
   });
 
   el.searchInput.addEventListener("input", () => {
-    window.clearTimeout(state.searchTimer);
-    state.searchTimer = window.setTimeout(() => {
-      const query = el.searchInput.value.trim();
-      if (!query) {
-        loadInitialContent();
-        return;
-      }
-      searchContent(query);
-    }, 250);
-  });
-
-  el.manualPlayBtn.addEventListener("click", () => {
-    const id = Number(el.manualId.value);
-    const season = Number(el.manualSeason.value) || 1;
-    const episode = Number(el.manualEpisode.value) || 1;
-    if (!id) {
-      setStatus("Enter a valid TMDB ID first.");
-      return;
-    }
-
-    const item = state.mediaType === "movie"
-      ? { id, title: `Movie #${id}` }
-      : { id, name: `TV Show #${id}`, season, episode };
-    playItem(item, { season, episode, mediaType: state.mediaType });
+    state.searchTerm = el.searchInput.value.trim().toLowerCase();
+    renderHome();
   });
 
   el.signInBtn.addEventListener("click", signIn);
   el.signUpBtn.addEventListener("click", signUp);
   el.signOutBtn.addEventListener("click", signOut);
-  el.syncNowBtn.addEventListener("click", syncProgressToCloud);
+  el.syncNowBtn.addEventListener("click", forceSyncNow);
 
   window.addEventListener("message", onPlayerMessage);
 }
 
 function togglePanel(panel) {
   const isHidden = panel.hasAttribute("hidden");
-  if (isHidden) {
-    panel.removeAttribute("hidden");
-  } else {
-    panel.setAttribute("hidden", "");
+  if (isHidden) panel.removeAttribute("hidden");
+  else panel.setAttribute("hidden", "");
+}
+
+function renderHome() {
+  const filter = state.searchTerm;
+  const filtered = filter
+    ? catalog.filter((item) => item.title.toLowerCase().includes(filter))
+    : catalog;
+
+  renderCards(el.recommendedGrid, filtered.filter((item) => item.tags.includes("recommended")).slice(0, 10));
+  renderCards(el.movieGrid, filtered.filter((item) => item.mediaType === "movie").slice(0, 14));
+  renderCards(el.tvGrid, filtered.filter((item) => item.mediaType === "tv").slice(0, 14));
+
+  renderContinueWatching();
+  setStatus(filter ? `Showing results for "${state.searchTerm}"` : "Ready.");
+}
+
+function renderCards(container, items) {
+  container.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+
+  items.forEach((item, index) => {
+    const node = el.cardTemplate.content.firstElementChild.cloneNode(true);
+    node.style.animationDelay = `${Math.min(index * 24, 360)}ms`;
+
+    const button = node.querySelector(".card-btn");
+    const poster = node.querySelector(".poster");
+    const title = node.querySelector(".title");
+    const meta = node.querySelector(".meta");
+
+    poster.src = item.poster;
+    poster.alt = `${item.title} poster`;
+    title.textContent = item.title;
+
+    if (item.mediaType === "tv") {
+      meta.textContent = `TV Series | ${item.year}`;
+    } else {
+      meta.textContent = `Movie | ${item.year}`;
+    }
+
+    button.addEventListener("click", () => {
+      playItem(item, {
+        mediaType: item.mediaType,
+        season: item.season || 1,
+        episode: item.episode || 1
+      });
+    });
+
+    fragment.appendChild(node);
+  });
+
+  container.appendChild(fragment);
+}
+
+function renderContinueWatching() {
+  const entries = Object.values(state.progress)
+    .filter((entry) => entry.timestamp > 20 && entry.progress < 98)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 8);
+
+  if (!entries.length) {
+    el.continueSection.setAttribute("hidden", "");
+    el.continueGrid.innerHTML = "";
+    return;
   }
+
+  el.continueSection.removeAttribute("hidden");
+  el.continueGrid.innerHTML = "";
+
+  const fragment = document.createDocumentFragment();
+
+  entries.forEach((entry) => {
+    const node = el.continueTemplate.content.firstElementChild.cloneNode(true);
+    const btn = node.querySelector(".continue-btn");
+    const poster = node.querySelector(".continue-poster");
+    const title = node.querySelector(".continue-title");
+    const meta = node.querySelector(".continue-meta");
+
+    const fallbackTitle = entry.mediaType === "movie"
+      ? `Movie #${entry.id}`
+      : `TV #${entry.id} S${entry.season}E${entry.episode}`;
+
+    poster.src = entry.poster || makePosterPlaceholder(fallbackTitle);
+    poster.alt = `${fallbackTitle} poster`;
+    title.textContent = entry.title || fallbackTitle;
+
+    if (entry.mediaType === "tv") {
+      meta.textContent = `Resume at ${formatSeconds(entry.timestamp)} | S${entry.season}E${entry.episode}`;
+    } else {
+      meta.textContent = `Resume at ${formatSeconds(entry.timestamp)} | ${Math.round(entry.progress)}%`;
+    }
+
+    btn.addEventListener("click", () => {
+      playItem(
+        {
+          id: entry.id,
+          title: entry.title || fallbackTitle,
+          mediaType: entry.mediaType,
+          poster: entry.poster
+        },
+        { mediaType: entry.mediaType, season: entry.season, episode: entry.episode }
+      );
+    });
+
+    fragment.appendChild(node);
+  });
+
+  el.continueGrid.appendChild(fragment);
+}
+
+function playItem(item, overrides = {}) {
+  const mediaType = overrides.mediaType || item.mediaType || "movie";
+  const id = Number(item.id);
+  if (!id) {
+    setStatus("Invalid title ID.");
+    return;
+  }
+
+  const season = Number(overrides.season || item.season || 1);
+  const episode = Number(overrides.episode || item.episode || 1);
+  const title = item.title || `Title #${id}`;
+  const resume = getSavedProgress(mediaType, id, season, episode);
+
+  const url = new URL(
+    mediaType === "movie"
+      ? `${VIDKING_BASE}/movie/${id}`
+      : `${VIDKING_BASE}/tv/${id}/${season}/${episode}`
+  );
+
+  url.searchParams.set("color", state.settings.color || "0dcaf0");
+  if (state.settings.autoPlay) url.searchParams.set("autoPlay", "true");
+  if (mediaType === "tv" && state.settings.nextEpisode) url.searchParams.set("nextEpisode", "true");
+  if (mediaType === "tv" && state.settings.episodeSelector) url.searchParams.set("episodeSelector", "true");
+  if (resume?.timestamp > 0) url.searchParams.set("progress", String(Math.floor(resume.timestamp)));
+
+  el.playerFrame.src = url.toString();
+  el.playerTitle.textContent = title;
+
+  if (mediaType === "movie") {
+    el.playerMeta.textContent = resume ? `Resume ${formatSeconds(resume.timestamp)}` : "Movie";
+  } else {
+    const resumeText = resume ? `, resume ${formatSeconds(resume.timestamp)}` : "";
+    el.playerMeta.textContent = `S${season} E${episode}${resumeText}`;
+  }
+
+  state.currentPlayback = {
+    mediaType,
+    id,
+    season,
+    episode,
+    title,
+    poster: item.poster || findPosterById(id)
+  };
+
+  setStatus(`Now playing: ${title}`);
+}
+
+function onPlayerMessage(event) {
+  if (!event?.data) return;
+
+  let parsed = event.data;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return;
+    }
+  }
+
+  if (parsed?.type !== "PLAYER_EVENT" || !parsed?.data) return;
+  const data = parsed.data;
+  if (!data.id || !data.mediaType) return;
+
+  const mediaType = data.mediaType === "tv" ? "tv" : "movie";
+  const id = Number(data.id);
+  const season = Number(data.season) || state.currentPlayback?.season || 1;
+  const episode = Number(data.episode) || state.currentPlayback?.episode || 1;
+
+  const key = progressId(mediaType, id, season, episode);
+  const timestamp = Number(data.currentTime) || 0;
+
+  state.progress[key] = {
+    mediaType,
+    id,
+    season,
+    episode,
+    timestamp,
+    duration: Number(data.duration) || 0,
+    progress: Number(data.progress) || 0,
+    updatedAt: Date.now(),
+    title: state.currentPlayback?.title || findTitleById(id) || `Title #${id}`,
+    poster: state.currentPlayback?.poster || findPosterById(id)
+  };
+
+  if (data.event === "ended") {
+    state.progress[key].timestamp = 0;
+    state.progress[key].progress = 100;
+  }
+
+  localStorage.setItem(progressKey, JSON.stringify(state.progress));
+  queueCloudSync();
+
+  if (data.event === "ended" && mediaType === "tv" && state.settings.autoNextSmart) {
+    const nextEpisode = episode + 1;
+    playItem(
+      {
+        id,
+        title: state.currentPlayback?.title || findTitleById(id) || `TV #${id}`,
+        mediaType: "tv",
+        poster: state.currentPlayback?.poster || findPosterById(id)
+      },
+      { mediaType: "tv", season, episode: nextEpisode }
+    );
+    setStatus(`Auto-next: S${season}E${nextEpisode}`);
+  }
+
+  if (data.event === "timeupdate" || data.event === "ended") {
+    renderContinueWatching();
+  }
+}
+
+function progressId(mediaType, id, season, episode) {
+  return `${mediaType}:${id}:${season || 1}:${episode || 1}`;
+}
+
+function getSavedProgress(mediaType, id, season, episode) {
+  const key = progressId(mediaType, id, season, episode);
+  return state.progress[key] || null;
+}
+
+function findTitleById(id) {
+  const match = catalog.find((item) => item.id === Number(id));
+  return match?.title || null;
+}
+
+function findPosterById(id) {
+  const match = catalog.find((item) => item.id === Number(id));
+  return match?.poster || null;
 }
 
 async function initAuth() {
   const config = window.CINERUNE_CONFIG || {};
   const supabaseUrl = String(config.supabaseUrl || "").trim();
-  const supabasePublishableKey = String(
-    config.supabasePublishableKey || config.supabaseAnonKey || ""
-  ).trim();
+  const supabasePublishableKey = String(config.supabasePublishableKey || config.supabaseAnonKey || "").trim();
 
   if (!supabaseUrl || !supabasePublishableKey) {
     setAuthHint("Set Supabase values in config.js to enable account sync.", true);
@@ -193,6 +383,7 @@ async function initAuth() {
     if (error) {
       console.warn("Auth session fetch failed", error.message);
     }
+
     state.session = data?.session || null;
     state.cloudEnabled = true;
 
@@ -205,14 +396,14 @@ async function initAuth() {
     });
 
     renderAuthUI();
-    updateCloudState(state.session?.user ? "Cloud sync: connected" : "Cloud sync: configured (login required)");
+    updateCloudState(state.session?.user ? "Cloud sync: connected" : "Cloud sync: ready (login required)");
 
     if (state.session?.user) {
       await pullCloudProgress();
     }
   } catch (error) {
     console.error("Supabase init failed", error);
-    setAuthHint("Supabase init failed. Check URL/key and try refresh.", true);
+    setAuthHint("Supabase init failed. Check URL/key and refresh.", true);
     updateCloudState("Cloud sync: error");
   }
 }
@@ -226,311 +417,126 @@ function renderAuthUI() {
   el.toggleAuth.textContent = signedIn ? "Account" : "Login";
 
   if (signedIn) {
-    el.authUserEmail.textContent = user.email || user.id;
+    const username = user.user_metadata?.username;
+    el.authUserEmail.textContent = username || user.email || user.id;
     setAuthHint("Signed in. Progress sync is active.");
     updateCloudState("Cloud sync: connected");
   } else {
     setAuthHint(state.cloudEnabled ? "Ready. Sign in or create account." : "Set Supabase values in config.js to enable account sync.", !state.cloudEnabled);
-    updateCloudState(state.cloudEnabled ? "Cloud sync: configured (login required)" : "Cloud sync: off");
+    updateCloudState(state.cloudEnabled ? "Cloud sync: ready (login required)" : "Cloud sync: off");
   }
+}
+
+function normalizeIdentifier(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value) return { error: "Enter username or email." };
+
+  if (value.includes("@")) {
+    return { email: value, username: null };
+  }
+
+  const username = value.replace(/[^a-z0-9._-]/g, "");
+  if (username.length < 3) {
+    return { error: "Username must be at least 3 characters." };
+  }
+
+  return {
+    email: `${username}@cinerune.user`,
+    username
+  };
 }
 
 async function signIn() {
   if (!state.supabase) {
     setAuthHint("Cloud auth is not configured in config.js.", true);
-    setStatus("Cloud auth is not configured in config.js.");
     return;
   }
 
-  const email = el.authEmail.value.trim();
+  const normalized = normalizeIdentifier(el.authIdentifier.value);
+  if (normalized.error) {
+    setAuthHint(normalized.error, true);
+    return;
+  }
+
   const password = el.authPassword.value;
-  if (!email || !password) {
-    setAuthHint("Enter email and password.", true);
-    setStatus("Enter email and password.");
+  if (!password) {
+    setAuthHint("Enter password.", true);
     return;
   }
 
   try {
     setAuthHint("Signing in...");
-    const { error } = await state.supabase.auth.signInWithPassword({ email, password });
+    const { error } = await state.supabase.auth.signInWithPassword({
+      email: normalized.email,
+      password
+    });
+
     if (error) {
       setAuthHint(`Sign in failed: ${error.message}`, true);
-      setStatus(`Sign in failed: ${error.message}`);
       return;
     }
 
     setAuthHint("Signed in. Syncing cloud progress...");
-    setStatus("Signed in. Syncing cloud progress...");
     await pullCloudProgress();
   } catch (error) {
-    const message = error?.message || "Unexpected sign in error";
-    setAuthHint(`Sign in failed: ${message}`, true);
-    setStatus(`Sign in failed: ${message}`);
+    setAuthHint(`Sign in failed: ${error?.message || "Unexpected error"}`, true);
   }
 }
 
 async function signUp() {
   if (!state.supabase) {
     setAuthHint("Cloud auth is not configured in config.js.", true);
-    setStatus("Cloud auth is not configured in config.js.");
     return;
   }
 
-  const email = el.authEmail.value.trim();
+  const normalized = normalizeIdentifier(el.authIdentifier.value);
+  if (normalized.error) {
+    setAuthHint(normalized.error, true);
+    return;
+  }
+
   const password = el.authPassword.value;
-  if (!email || !password) {
-    setAuthHint("Enter email and password.", true);
-    setStatus("Enter email and password.");
+  if (!password || password.length < 6) {
+    setAuthHint("Password must be at least 6 characters.", true);
     return;
   }
 
   try {
     setAuthHint("Creating account...");
-    const { error } = await state.supabase.auth.signUp({ email, password });
+    const payload = {
+      email: normalized.email,
+      password,
+      options: {}
+    };
+
+    if (normalized.username) {
+      payload.options.data = { username: normalized.username };
+    }
+
+    const { error } = await state.supabase.auth.signUp(payload);
+
     if (error) {
       setAuthHint(`Sign up failed: ${error.message}`, true);
-      setStatus(`Sign up failed: ${error.message}`);
       return;
     }
 
-    const ok = "Account created. Check your email if confirmation is enabled.";
-    setAuthHint(ok);
-    setStatus(ok);
+    setAuthHint("Account created. If email confirmation is on, confirm then sign in.");
   } catch (error) {
-    const message = error?.message || "Unexpected sign up error";
-    setAuthHint(`Sign up failed: ${message}`, true);
-    setStatus(`Sign up failed: ${message}`);
+    setAuthHint(`Sign up failed: ${error?.message || "Unexpected error"}`, true);
   }
 }
 
 async function signOut() {
   if (!state.supabase) return;
+
   const { error } = await state.supabase.auth.signOut();
   if (error) {
     setAuthHint(`Sign out failed: ${error.message}`, true);
-    setStatus(`Sign out failed: ${error.message}`);
     return;
   }
+
   setAuthHint("Signed out.");
   setStatus("Signed out.");
-}
-
-async function loadInitialContent() {
-  const query = el.searchInput.value.trim();
-  if (query) {
-    searchContent(query);
-    return;
-  }
-
-  if (!state.settings.apiKey) {
-    setStatus("TMDB API key not set. Showing starter picks and manual launch.");
-    renderCards(defaultFeatured[state.mediaType], state.mediaType);
-    return;
-  }
-
-  setStatus("Loading trending titles...");
-  const endpoint = state.mediaType === "movie" ? "/movie/popular" : "/tv/popular";
-  const data = await fetchTmdb(endpoint, { page: "1" });
-  if (!data?.results) {
-    setStatus("Could not fetch TMDB right now. Showing starter picks.");
-    renderCards(defaultFeatured[state.mediaType], state.mediaType);
-    return;
-  }
-
-  renderCards(data.results, state.mediaType);
-  setStatus(`Loaded ${data.results.length} titles.`);
-}
-
-async function searchContent(query) {
-  if (!state.settings.apiKey) {
-    const list = defaultFeatured[state.mediaType].filter((entry) => {
-      const title = (entry.title || entry.name || "").toLowerCase();
-      return title.includes(query.toLowerCase());
-    });
-    renderCards(list, state.mediaType);
-    setStatus(`Offline mode: ${list.length} result(s) from starter picks.`);
-    return;
-  }
-
-  setStatus(`Searching for "${query}"...`);
-  const endpoint = state.mediaType === "movie" ? "/search/movie" : "/search/tv";
-  const data = await fetchTmdb(endpoint, { query, page: "1", include_adult: "false" });
-
-  if (!data?.results) {
-    setStatus("Search failed. Check key/network and try again.");
-    return;
-  }
-
-  renderCards(data.results, state.mediaType);
-  setStatus(`Found ${data.results.length} result(s).`);
-}
-
-function renderCards(items, mediaType) {
-  el.results.innerHTML = "";
-
-  const fragment = document.createDocumentFragment();
-
-  items.slice(0, 42).forEach((item, index) => {
-    const node = el.cardTemplate.content.firstElementChild.cloneNode(true);
-    node.style.animationDelay = `${Math.min(index * 26, 390)}ms`;
-
-    const button = node.querySelector(".card-btn");
-    const poster = node.querySelector(".poster");
-    const title = node.querySelector(".title");
-    const meta = node.querySelector(".meta");
-
-    const displayTitle = item.title || item.name || "Untitled";
-    const date = item.release_date || item.first_air_date || "Unknown date";
-
-    poster.src = item.poster_path ? `${TMDB_IMG}${item.poster_path}` : makePosterPlaceholder(displayTitle);
-    poster.alt = `${displayTitle} poster`;
-
-    title.textContent = displayTitle;
-    meta.textContent = `${mediaType.toUpperCase()} | ${date}`;
-
-    button.addEventListener("click", () => {
-      playItem(item, { mediaType });
-    });
-
-    fragment.appendChild(node);
-  });
-
-  el.results.appendChild(fragment);
-}
-
-function playItem(item, overrides = {}) {
-  const mediaType = overrides.mediaType || state.mediaType;
-  const id = Number(item.id);
-  if (!id) {
-    setStatus("This title has no valid TMDB ID.");
-    return;
-  }
-
-  const season = overrides.season || Number(item.season) || 1;
-  const episode = overrides.episode || Number(item.episode) || 1;
-
-  const title = item.title || item.name || `Title #${id}`;
-  const resume = getSavedProgress(mediaType, id, season, episode);
-
-  const url = new URL(
-    mediaType === "movie"
-      ? `${VIDKING_BASE}/movie/${id}`
-      : `${VIDKING_BASE}/tv/${id}/${season}/${episode}`
-  );
-
-  url.searchParams.set("color", state.settings.color || "0dcaf0");
-  if (state.settings.autoPlay) url.searchParams.set("autoPlay", "true");
-  if (mediaType === "tv" && state.settings.nextEpisode) url.searchParams.set("nextEpisode", "true");
-  if (mediaType === "tv" && state.settings.episodeSelector) url.searchParams.set("episodeSelector", "true");
-  if (resume?.timestamp > 0) url.searchParams.set("progress", String(Math.floor(resume.timestamp)));
-
-  el.playerFrame.src = url.toString();
-  el.playerTitle.textContent = title;
-
-  if (mediaType === "movie") {
-    el.playerMeta.textContent = resume ? `Resume at ${formatSeconds(resume.timestamp)}` : "Movie";
-  } else {
-    const resumeText = resume ? `, resume ${formatSeconds(resume.timestamp)}` : "";
-    el.playerMeta.textContent = `S${season} E${episode}${resumeText}`;
-  }
-
-  state.currentPlayback = {
-    mediaType,
-    id,
-    season,
-    episode,
-    title
-  };
-
-  setMediaType(mediaType);
-  setStatus(`Now playing: ${title}`);
-}
-
-async function fetchTmdb(endpoint, params = {}) {
-  if (!state.settings.apiKey) return null;
-
-  if (state.abortController) {
-    state.abortController.abort();
-  }
-  state.abortController = new AbortController();
-
-  const url = new URL(`${TMDB_BASE}${endpoint}`);
-  url.searchParams.set("api_key", state.settings.apiKey);
-  Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.set(key, String(value));
-  });
-
-  try {
-    const response = await fetch(url, {
-      signal: state.abortController.signal,
-      cache: "force-cache"
-    });
-    if (!response.ok) return null;
-    return await response.json();
-  } catch (error) {
-    if (error?.name !== "AbortError") {
-      console.error("TMDB request failed", error);
-    }
-    return null;
-  }
-}
-
-function onPlayerMessage(event) {
-  if (!event?.data) return;
-
-  let parsed = event.data;
-  if (typeof event.data === "string") {
-    try {
-      parsed = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-  }
-
-  if (parsed?.type !== "PLAYER_EVENT" || !parsed?.data) return;
-  const data = parsed.data;
-
-  if (!data.id || !data.mediaType) return;
-
-  const mediaType = data.mediaType === "tv" ? "tv" : "movie";
-  const id = Number(data.id);
-  const season = Number(data.season) || 1;
-  const episode = Number(data.episode) || 1;
-
-  const key = progressId(mediaType, id, season, episode);
-  const timestamp = Number(data.currentTime) || 0;
-
-  state.progress[key] = {
-    mediaType,
-    id,
-    season,
-    episode,
-    timestamp,
-    duration: Number(data.duration) || 0,
-    progress: Number(data.progress) || 0,
-    updatedAt: Date.now()
-  };
-
-  if (data.event === "ended") {
-    state.progress[key].timestamp = 0;
-    state.progress[key].progress = 100;
-  }
-
-  localStorage.setItem(progressKey, JSON.stringify(state.progress));
-  queueCloudSync();
-
-  if (data.event === "ended" && mediaType === "tv" && state.settings.autoNextSmart) {
-    const nextEpisode = episode + 1;
-    playItem(
-      { id, name: state.currentPlayback?.title || `TV #${id}` },
-      { mediaType: "tv", season, episode: nextEpisode }
-    );
-    setStatus(`Auto-next: S${season}E${nextEpisode}`);
-  }
-
-  if (data.event === "timeupdate" || data.event === "ended") {
-    renderContinueWatching();
-  }
 }
 
 function queueCloudSync() {
@@ -539,14 +545,19 @@ function queueCloudSync() {
   window.clearTimeout(state.syncTimer);
   state.syncTimer = window.setTimeout(() => {
     syncProgressToCloud();
-  }, 800);
+  }, 900);
+}
+
+async function forceSyncNow() {
+  state.syncQueued = true;
+  await syncProgressToCloud();
 }
 
 async function syncProgressToCloud() {
   if (!state.session?.user || !state.supabase || !state.syncQueued) return;
 
   const userId = state.session.user.id;
-  const rows = Object.values(state.progress).slice(-120).map((entry) => ({
+  const rows = Object.values(state.progress).slice(-160).map((entry) => ({
     user_id: userId,
     media_type: entry.mediaType,
     content_id: entry.id,
@@ -572,6 +583,7 @@ async function syncProgressToCloud() {
   }
 
   state.syncQueued = false;
+  setStatus("Progress synced.");
   updateCloudState("Cloud sync: connected");
 }
 
@@ -592,26 +604,25 @@ async function pullCloudProgress() {
 
   let merged = 0;
   (data || []).forEach((row) => {
-    const key = progressId(
-      row.media_type,
-      Number(row.content_id),
-      Number(row.season_number) || 1,
-      Number(row.episode_number) || 1
-    );
-
+    const id = Number(row.content_id);
+    const season = Number(row.season_number) || 1;
+    const episode = Number(row.episode_number) || 1;
+    const key = progressId(row.media_type, id, season, episode);
     const updatedAt = Date.parse(row.updated_at || "") || Date.now();
     const local = state.progress[key];
 
     if (!local || updatedAt > (local.updatedAt || 0)) {
       state.progress[key] = {
         mediaType: row.media_type,
-        id: Number(row.content_id),
-        season: Number(row.season_number) || 1,
-        episode: Number(row.episode_number) || 1,
+        id,
+        season,
+        episode,
         timestamp: Number(row.timestamp_seconds) || 0,
         duration: Number(row.duration_seconds) || 0,
         progress: Number(row.progress_percent) || 0,
-        updatedAt
+        updatedAt,
+        title: findTitleById(id) || `Title #${id}`,
+        poster: findPosterById(id)
       };
       merged += 1;
     }
@@ -619,79 +630,23 @@ async function pullCloudProgress() {
 
   localStorage.setItem(progressKey, JSON.stringify(state.progress));
   renderContinueWatching();
+
   if (merged > 0) {
     setStatus(`Synced ${merged} progress item(s) from cloud.`);
   }
 }
 
-function renderContinueWatching() {
-  const entries = Object.values(state.progress)
-    .filter((entry) => entry.timestamp > 20 && entry.progress < 98)
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 10);
-
-  if (!entries.length) {
-    el.continueWrap.setAttribute("hidden", "");
-    el.continueGrid.innerHTML = "";
-    return;
-  }
-
-  el.continueWrap.removeAttribute("hidden");
-  el.continueGrid.innerHTML = "";
-
-  const fragment = document.createDocumentFragment();
-
-  entries.forEach((entry) => {
-    const card = document.createElement("article");
-    card.className = "continue-item";
-
-    const btn = document.createElement("button");
-    const label = entry.mediaType === "movie"
-      ? `Movie #${entry.id}`
-      : `TV #${entry.id} S${entry.season}E${entry.episode}`;
-
-    btn.innerHTML = `
-      <strong>${label}</strong><br>
-      <span>Resume at ${formatSeconds(entry.timestamp)} (${Math.round(entry.progress)}%)</span>
-    `;
-
-    btn.addEventListener("click", () => {
-      playItem(
-        entry.mediaType === "movie"
-          ? { id: entry.id, title: `Movie #${entry.id}` }
-          : { id: entry.id, name: `TV #${entry.id}` },
-        { mediaType: entry.mediaType, season: entry.season, episode: entry.episode }
-      );
-    });
-
-    card.appendChild(btn);
-    fragment.appendChild(card);
-  });
-
-  el.continueGrid.appendChild(fragment);
-}
-
-function progressId(mediaType, id, season, episode) {
-  return `${mediaType}:${id}:${season || 1}:${episode || 1}`;
-}
-
-function getSavedProgress(mediaType, id, season, episode) {
-  const key = progressId(mediaType, id, season, episode);
-  return state.progress[key] || null;
-}
-
-function setMediaType(type) {
-  state.mediaType = type;
-  el.tabs.forEach((tab) => {
-    const active = tab.dataset.type === type;
-    tab.classList.toggle("active", active);
-    tab.setAttribute("aria-selected", String(active));
-  });
-}
-
 function sanitizeColor(input) {
   const clean = String(input || "").trim().replace(/^#/, "").toLowerCase();
   return /^[0-9a-f]{6}$/.test(clean) ? clean : "0dcaf0";
+}
+
+function hydrateSettingsUI() {
+  el.colorInput.value = sanitizeColor(state.settings.color);
+  el.autoplayInput.checked = Boolean(state.settings.autoPlay);
+  el.nextEpisodeInput.checked = Boolean(state.settings.nextEpisode);
+  el.episodeSelectorInput.checked = Boolean(state.settings.episodeSelector);
+  el.autoNextSmartInput.checked = Boolean(state.settings.autoNextSmart);
 }
 
 function readJson(key, fallback) {
@@ -703,15 +658,6 @@ function readJson(key, fallback) {
   }
 }
 
-function hydrateSettingsUI() {
-  el.apiKeyInput.value = state.settings.apiKey || "";
-  el.colorInput.value = sanitizeColor(state.settings.color);
-  el.autoplayInput.checked = Boolean(state.settings.autoPlay);
-  el.nextEpisodeInput.checked = Boolean(state.settings.nextEpisode);
-  el.episodeSelectorInput.checked = Boolean(state.settings.episodeSelector);
-  el.autoNextSmartInput.checked = Boolean(state.settings.autoNextSmart);
-}
-
 function setStatus(message) {
   el.statusLine.textContent = message;
 }
@@ -721,7 +667,6 @@ function updateCloudState(message) {
 }
 
 function setAuthHint(message, isError = false) {
-  if (!el.authHint) return;
   el.authHint.textContent = message;
   el.authHint.style.color = isError ? "#b42318" : "";
 }
@@ -739,16 +684,16 @@ function formatSeconds(value) {
 }
 
 function makePosterPlaceholder(text) {
-  const safe = encodeURIComponent(text.slice(0, 22));
+  const safe = encodeURIComponent(text.slice(0, 24));
   return `https://placehold.co/300x450/f3f4f6/111827?text=${safe}`;
 }
 
 function registerServiceWorker() {
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch((error) => {
-        console.warn("Service worker registration failed", error);
-      });
+  if (!("serviceWorker" in navigator)) return;
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch((error) => {
+      console.warn("Service worker registration failed", error);
     });
-  }
+  });
 }
