@@ -18,60 +18,52 @@
       <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
 
       <nav class="home-nav" aria-label="Main navigation">
-        <a href="#continueSection">Continue Watching</a>
-        <a href="#recommendedSection">Recommended</a>
-        <a href="#latestMoviesSection">Latest Movies</a>
+        <button id="showGenreExplorer" class="chip" type="button">Genre</button>
+        <button id="showCountryExplorer" class="chip" type="button">Countries</button>
       </nav>
 
+      <a class="pill-btn ghost" href="./lists.html">My Lists</a>
       <button id="toggleAuth" class="pill-btn" type="button">Account</button>
     </header>
 
-    <section class="account-panel" id="authPanel" hidden>
-      <div class="account-grid" id="signedOutView">
-        <h2>Account</h2>
-        <label>
-          <span>Username or Email</span>
-          <input id="authIdentifier" type="text" placeholder="username or email" />
-        </label>
-        <label>
-          <span>Password</span>
-          <input id="authPassword" type="password" placeholder="password" />
-        </label>
-        <div class="account-actions">
-          <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
-          <button id="signUpBtn" class="pill-btn ghost" type="button">Create Account</button>
+    <section id="megaMenuPanel" class="mega-menu" hidden>
+      <div class="mega-menu-inner">
+        <div class="mega-menu-head">
+          <h3 id="megaMenuTitle">Genres</h3>
         </div>
-        <p id="authHint" class="tiny muted">Set Supabase values in config.js to enable sync.</p>
+        <div id="megaMenuGrid" class="mega-menu-grid"></div>
       </div>
+    </section>
 
-      <div id="signedInView" hidden>
-        <p class="tiny">Signed in as <strong id="authUserEmail">-</strong></p>
-        <div class="account-actions">
-          <button id="syncNowBtn" class="pill-btn" type="button">Sync Now</button>
-          <button id="signOutBtn" class="pill-btn ghost" type="button">Sign Out</button>
+    <section id="authModal" class="auth-modal" hidden>
+      <div class="auth-backdrop" id="authBackdrop"></div>
+      <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+        <button id="closeAuth" class="auth-close" type="button" aria-label="Close account dialog">x</button>
+        <div class="account-grid" id="signedOutView">
+          <h2 id="authTitle">Welcome Back</h2>
+          <label>
+            <span>Username or Email</span>
+            <input id="authIdentifier" type="text" placeholder="username or email" />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="authPassword" type="password" placeholder="your password" />
+          </label>
+          <div class="account-actions">
+            <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
+            <button id="signUpBtn" class="pill-btn ghost" type="button">Create Account</button>
+          </div>
+          <p id="authHint" class="tiny muted">Sign in to save your lists.</p>
         </div>
 
-        <section class="folder-section">
-          <h3>My Lists</h3>
-          <div class="folder-grid">
-            <article class="folder-card">
-              <h4>Watching</h4>
-              <div id="folderWatching" class="folder-list"></div>
-            </article>
-            <article class="folder-card">
-              <h4>Watched</h4>
-              <div id="folderWatched" class="folder-list"></div>
-            </article>
-            <article class="folder-card">
-              <h4>Plan to Watch</h4>
-              <div id="folderPlan" class="folder-list"></div>
-            </article>
-            <article class="folder-card">
-              <h4>Dropped</h4>
-              <div id="folderDropped" class="folder-list"></div>
-            </article>
+        <div id="signedInView" hidden>
+          <h2>Account</h2>
+          <p class="tiny">Signed in as <strong id="authUserEmail">-</strong></p>
+          <div class="account-actions">
+            <button id="signOutBtn" class="pill-btn ghost" type="button">Sign Out</button>
           </div>
-        </section>
+          <p id="signedInHint" class="tiny muted">You are signed in.</p>
+        </div>
       </div>
     </section>
 
@@ -94,28 +86,36 @@
         <div id="continueGrid" class="poster-row"></div>
       </section>
 
+      <section id="searchSection" class="home-row">
+        <div class="row-head">
+          <h2>Search</h2>
+        </div>
+        <div class="search-wrap search-wrap-wide">
+          <input id="searchInput" class="search-input" type="search" placeholder="Search movies or shows..." autocomplete="off" />
+          <div id="searchSuggestions" class="search-suggestions" hidden></div>
+        </div>
+      </section>
+
+      <section id="searchResultsSection" class="home-row" hidden>
+        <div class="row-head compact">
+          <h3>Top Results</h3>
+        </div>
+        <div id="searchResultsGrid" class="poster-row"></div>
+      </section>
+
       <section id="recommendedSection" class="home-row">
         <div class="row-head">
           <h2>Recommended</h2>
-          <div class="filter-chips">
-            <button id="showRecommendedAll" class="chip active" type="button">All</button>
-            <button id="showRecommendedMovies" class="chip" type="button">Movies</button>
-            <button id="showRecommendedTv" class="chip" type="button">TV Series</button>
-          </div>
         </div>
-        <div id="recommendedGrid" class="poster-grid"></div>
+        <div id="recommendedGrid" class="poster-row"></div>
       </section>
 
-      <section id="latestMoviesSection" class="home-row">
+      <section id="trendingSection" class="home-row">
         <div class="row-head">
-          <h2>Latest Movies</h2>
-          <input id="searchInput" class="search-input" type="search" placeholder="Search titles..." />
+          <h2>Trending</h2>
         </div>
-        <div id="latestMoviesGrid" class="poster-row"></div>
+        <div id="trendingGrid" class="poster-row"></div>
       </section>
-
-      <p id="statusLine" class="tiny muted">Loading library...</p>
-      <p id="cloudState" class="tiny muted">Cloud sync: off</p>
     </main>
 
     <template id="posterCardTemplate">
@@ -133,6 +133,6 @@
 
     <script src="config.js"></script>
     <script src="config.local.js"></script>
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=20260423b"></script>
   </body>
 </html>

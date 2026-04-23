@@ -1,27 +1,32 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-import {
-  initTmdb,
-  fetchHomeCatalog,
-  searchCatalog,
-  titleById,
-  posterById,
-  fetchItemsByIds
-} from "./catalog.js";
+import * as catalogApi from "./catalog.js?v=20260423b";
+
+const initTmdb = catalogApi.initTmdb;
+const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
+const fetchGenreOptions = catalogApi.fetchGenreOptions || (async () => ({ movie: [], tv: [] }));
+const fetchCountryOptions = catalogApi.fetchCountryOptions || (async () => []);
+const searchCatalog = catalogApi.searchCatalog;
+const titleById = catalogApi.titleById;
+const posterById = catalogApi.posterById;
+const fetchItemsByIds = catalogApi.fetchItemsByIds;
 
 const progressKey = "cinerune:progress";
 const bookmarksKey = "cinerune:bookmarks";
+const homeCacheKey = "cinerune:home-cache";
 
 const el = {
   toggleAuth: document.getElementById("toggleAuth"),
-  authPanel: document.getElementById("authPanel"),
+  authModal: document.getElementById("authModal"),
+  authBackdrop: document.getElementById("authBackdrop"),
+  closeAuth: document.getElementById("closeAuth"),
   signedOutView: document.getElementById("signedOutView"),
   signedInView: document.getElementById("signedInView"),
+  signedInHint: document.getElementById("signedInHint"),
   authIdentifier: document.getElementById("authIdentifier"),
   authPassword: document.getElementById("authPassword"),
   signInBtn: document.getElementById("signInBtn"),
   signUpBtn: document.getElementById("signUpBtn"),
   signOutBtn: document.getElementById("signOutBtn"),
-  syncNowBtn: document.getElementById("syncNowBtn"),
   authHint: document.getElementById("authHint"),
   authUserEmail: document.getElementById("authUserEmail"),
   heroSection: document.getElementById("heroSection"),
@@ -30,20 +35,19 @@ const el = {
   heroMeta: document.getElementById("heroMeta"),
   heroDesc: document.getElementById("heroDesc"),
   heroWatchBtn: document.getElementById("heroWatchBtn"),
+  showGenreExplorer: document.getElementById("showGenreExplorer"),
+  showCountryExplorer: document.getElementById("showCountryExplorer"),
+  megaMenuPanel: document.getElementById("megaMenuPanel"),
+  megaMenuTitle: document.getElementById("megaMenuTitle"),
+  megaMenuGrid: document.getElementById("megaMenuGrid"),
   continueSection: document.getElementById("continueSection"),
   continueGrid: document.getElementById("continueGrid"),
   recommendedGrid: document.getElementById("recommendedGrid"),
-  latestMoviesGrid: document.getElementById("latestMoviesGrid"),
-  showRecommendedAll: document.getElementById("showRecommendedAll"),
-  showRecommendedMovies: document.getElementById("showRecommendedMovies"),
-  showRecommendedTv: document.getElementById("showRecommendedTv"),
+  trendingGrid: document.getElementById("trendingGrid"),
   searchInput: document.getElementById("searchInput"),
-  statusLine: document.getElementById("statusLine"),
-  cloudState: document.getElementById("cloudState"),
-  folderWatching: document.getElementById("folderWatching"),
-  folderWatched: document.getElementById("folderWatched"),
-  folderPlan: document.getElementById("folderPlan"),
-  folderDropped: document.getElementById("folderDropped"),
+  searchSuggestions: document.getElementById("searchSuggestions"),
+  searchResultsSection: document.getElementById("searchResultsSection"),
+  searchResultsGrid: document.getElementById("searchResultsGrid"),
   posterCardTemplate: document.getElementById("posterCardTemplate")
 };
 
@@ -56,10 +60,16 @@ const state = {
   homeData: {
     hero: null,
     recommended: [],
-    latestMovies: []
+    trending: []
   },
-  recommendedFilter: "all",
-  searchTerm: ""
+  genreOptions: [],
+  countryOptions: [],
+  explorerMode: "genre",
+  searchTerm: "",
+  searchResults: [],
+  autoSyncTimer: null,
+  lastSyncAt: 0,
+  heroRotationTimer: null
 };
 
 boot();
@@ -76,74 +86,151 @@ async function boot() {
   await initAuth();
   await refreshHome();
   await hydrateContinueRow();
-  renderBookmarkFolders();
   registerServiceWorker();
 }
 
 function bindEvents() {
-  el.toggleAuth.addEventListener("click", () => {
-    const hidden = el.authPanel.hasAttribute("hidden");
-    if (hidden) {
-      el.authPanel.removeAttribute("hidden");
-      renderBookmarkFolders();
-    } else {
-      el.authPanel.setAttribute("hidden", "");
+  if (el.toggleAuth) {
+    el.toggleAuth.addEventListener("click", () => {
+      openAuthModal();
+    });
+  }
+
+  if (el.closeAuth) {
+    el.closeAuth.addEventListener("click", closeAuthModal);
+  }
+  if (el.authBackdrop) {
+    el.authBackdrop.addEventListener("click", closeAuthModal);
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAuthModal();
+  });
+
+  if (el.signInBtn) el.signInBtn.addEventListener("click", signIn);
+  if (el.signUpBtn) el.signUpBtn.addEventListener("click", signUp);
+  if (el.signOutBtn) el.signOutBtn.addEventListener("click", signOut);
+
+  if (el.showGenreExplorer) {
+    el.showGenreExplorer.addEventListener("click", () => {
+      state.explorerMode = "genre";
+      renderMegaMenu();
+      openMegaMenu();
+    });
+  }
+  if (el.showCountryExplorer) {
+    el.showCountryExplorer.addEventListener("click", () => {
+      state.explorerMode = "country";
+      renderMegaMenu();
+      openMegaMenu();
+    });
+  }
+
+  if (el.searchInput) {
+    el.searchInput.addEventListener("input", debounce(async () => {
+      state.searchTerm = el.searchInput.value.trim();
+      if (!state.searchTerm) {
+        state.searchResults = [];
+        hideSearchSuggestions();
+        hideSearchResults();
+        return;
+      }
+
+      try {
+        const result = await searchCatalog(state.searchTerm);
+        const merged = [...result.movies, ...result.tv].slice(0, 24);
+        state.searchResults = merged;
+        renderSearchResults(merged);
+        renderSearchSuggestions(state.searchResults);
+      } catch {
+        hideSearchSuggestions();
+        hideSearchResults();
+      }
+    }, 280));
+
+    el.searchInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      const first = state.searchResults[0];
+      if (!first) return;
+      openWatchPage(first.id, first.mediaType, 1, 1);
+    });
+  }
+
+  document.addEventListener("click", (event) => {
+    if (!el.searchInput || !el.searchSuggestions) return;
+    if (event.target === el.searchInput || el.searchSuggestions.contains(event.target)) return;
+    hideSearchSuggestions();
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!el.megaMenuPanel || el.megaMenuPanel.hasAttribute("hidden")) return;
+    const target = event.target;
+    const clickedToggle = el.showGenreExplorer?.contains(target) || el.showCountryExplorer?.contains(target);
+    const clickedInsidePanel = el.megaMenuPanel.contains(target);
+    if (!clickedToggle && !clickedInsidePanel) {
+      closeMegaMenu();
     }
   });
 
-  el.signInBtn.addEventListener("click", signIn);
-  el.signUpBtn.addEventListener("click", signUp);
-  el.signOutBtn.addEventListener("click", signOut);
-  el.syncNowBtn.addEventListener("click", forceSyncNow);
-
-  el.showRecommendedAll.addEventListener("click", () => {
-    state.recommendedFilter = "all";
-    renderRecommended();
-  });
-  el.showRecommendedMovies.addEventListener("click", () => {
-    state.recommendedFilter = "movie";
-    renderRecommended();
-  });
-  el.showRecommendedTv.addEventListener("click", () => {
-    state.recommendedFilter = "tv";
-    renderRecommended();
-  });
-
-  el.searchInput.addEventListener("input", debounce(async () => {
-    state.searchTerm = el.searchInput.value.trim();
-    if (!state.searchTerm) {
-      renderRecommended();
-      renderLatestMovies();
-      setStatus("Home feed loaded.");
-      return;
-    }
-
+  window.addEventListener("storage", (event) => {
+    if (event.key !== progressKey || !event.newValue) return;
     try {
-      const result = await searchCatalog(state.searchTerm);
-      const merged = [...result.movies, ...result.tv].slice(0, 24);
-      renderPosterCards(el.recommendedGrid, merged);
-      renderPosterCards(el.latestMoviesGrid, result.movies.slice(0, 16));
-      setStatus(`Search results for \"${state.searchTerm}\"`);
-    } catch (error) {
-      setStatus(`Search failed: ${error.message}`);
+      state.progress = JSON.parse(event.newValue);
+      hydrateContinueRow();
+      queueAutoSync();
+    } catch {
+      // ignore malformed storage values
     }
-  }, 280));
+  });
 }
 
 async function refreshHome() {
-  try {
-    const data = await fetchHomeCatalog();
-    state.homeData.hero = data.hero;
-    state.homeData.recommended = data.recommended;
-    state.homeData.latestMovies = data.latestMovies;
+  const [homeResult, genresResult, countriesResult] = await Promise.allSettled([
+    fetchHomeCatalog(),
+    fetchGenreOptions(),
+    fetchCountryOptions()
+  ]);
 
-    renderHero();
-    renderRecommended();
-    renderLatestMovies();
-    setStatus("Home feed loaded.");
-  } catch (error) {
-    setStatus(`Failed to load TMDB feeds: ${error.message}`);
+  let homeData = null;
+  if (homeResult.status === "fulfilled") {
+    homeData = homeResult.value;
+    localStorage.setItem(homeCacheKey, JSON.stringify(homeData));
+  } else {
+    homeData = readJson(homeCacheKey, null);
   }
+
+  if (!homeData) {
+    renderUnavailableState();
+    return;
+  }
+
+  state.homeData.hero = homeData.hero || null;
+  state.homeData.recommended = homeData.recommended || [];
+  state.homeData.trending = homeData.trending || [];
+
+  const genreData = genresResult.status === "fulfilled" ? genresResult.value : { movie: [], tv: [] };
+  state.genreOptions = dedupeExplorerOptions([...(genreData.movie || []), ...(genreData.tv || [])], "id");
+  state.countryOptions = countriesResult.status === "fulfilled" ? (countriesResult.value || []) : [];
+
+  renderHero();
+  renderRecommended();
+  renderTrending();
+  renderMegaMenu();
+  startHeroRotation();
+}
+
+function renderUnavailableState() {
+  if (!el.heroType || !el.heroTitle || !el.heroMeta || !el.heroDesc || !el.heroSection || !el.heroWatchBtn) return;
+  el.heroType.textContent = "Featured";
+  el.heroTitle.textContent = "Content unavailable";
+  el.heroMeta.textContent = "Please refresh in a moment";
+  el.heroDesc.textContent = "We are having trouble loading this page right now.";
+  el.heroSection.style.background = "linear-gradient(90deg, rgba(7,15,31,0.9), rgba(7,15,31,0.6))";
+  el.heroWatchBtn.onclick = null;
+
+  el.recommendedGrid.innerHTML = "";
+  el.trendingGrid.innerHTML = "";
+  if (el.megaMenuGrid) el.megaMenuGrid.innerHTML = "";
 }
 
 function renderHero() {
@@ -165,21 +252,65 @@ function renderHero() {
   };
 }
 
-function renderRecommended() {
-  const all = state.homeData.recommended || [];
-  const filtered = state.recommendedFilter === "all"
-    ? all
-    : all.filter((item) => item.mediaType === state.recommendedFilter);
+function startHeroRotation() {
+  if (state.heroRotationTimer) {
+    clearInterval(state.heroRotationTimer);
+    state.heroRotationTimer = null;
+  }
 
-  el.showRecommendedAll.classList.toggle("active", state.recommendedFilter === "all");
-  el.showRecommendedMovies.classList.toggle("active", state.recommendedFilter === "movie");
-  el.showRecommendedTv.classList.toggle("active", state.recommendedFilter === "tv");
+  const pool = dedupeById([
+    state.homeData.hero,
+    ...(state.homeData.recommended || []).slice(0, 8),
+    ...(state.homeData.trending || []).slice(0, 8)
+  ].filter(Boolean));
 
-  renderPosterCards(el.recommendedGrid, filtered.slice(0, 24));
+  if (pool.length < 2) return;
+
+  state.heroRotationTimer = window.setInterval(() => {
+    const next = pool[Math.floor(Math.random() * pool.length)];
+    if (!next) return;
+    state.homeData.hero = next;
+    renderHero();
+  }, 12000);
 }
 
-function renderLatestMovies() {
-  renderPosterCards(el.latestMoviesGrid, (state.homeData.latestMovies || []).slice(0, 18));
+function renderRecommended() {
+  if (!el.recommendedGrid) return;
+  renderPosterCards(el.recommendedGrid, (state.homeData.recommended || []).slice(0, 24));
+}
+
+function renderTrending() {
+  if (!el.trendingGrid) return;
+  renderPosterCards(el.trendingGrid, (state.homeData.trending || []).slice(0, 24));
+}
+
+function renderMegaMenu() {
+  if (!el.megaMenuTitle || !el.megaMenuGrid) return;
+  const isGenre = state.explorerMode === "genre";
+  const options = isGenre ? state.genreOptions : state.countryOptions;
+  el.megaMenuTitle.textContent = isGenre ? "Genres" : "Countries";
+
+  if (!options.length) {
+    el.megaMenuGrid.innerHTML = "";
+    return;
+  }
+
+  el.megaMenuGrid.innerHTML = options.map((entry) => {
+    const value = isGenre ? entry.id : entry.code;
+    const label = entry.name;
+    return `
+    <button class="mega-menu-item" type="button" data-mode="${state.explorerMode}" data-value="${escapeHtml(value)}" data-name="${escapeHtml(label)}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+  }).join("");
+
+  [...el.megaMenuGrid.querySelectorAll(".mega-menu-item")].forEach((node) => {
+    node.addEventListener("click", () => {
+      openBrowsePage(node.dataset.mode, node.dataset.value, node.dataset.name);
+      closeMegaMenu();
+    });
+  });
 }
 
 async function hydrateContinueRow() {
@@ -250,36 +381,6 @@ function renderPosterCards(container, items, options = {}) {
   container.appendChild(fragment);
 }
 
-function renderBookmarkFolders() {
-  const entries = Object.values(state.bookmarks)
-    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-
-  renderFolder(el.folderWatching, entries.filter((entry) => entry.status === "watching"));
-  renderFolder(el.folderWatched, entries.filter((entry) => entry.status === "watched"));
-  renderFolder(el.folderPlan, entries.filter((entry) => entry.status === "plan"));
-  renderFolder(el.folderDropped, entries.filter((entry) => entry.status === "dropped"));
-}
-
-function renderFolder(container, entries) {
-  if (!container) return;
-  if (!entries.length) {
-    container.innerHTML = '<p class="tiny muted">Empty</p>';
-    return;
-  }
-
-  const html = entries.slice(0, 8)
-    .map((entry) => `<button class="folder-item" data-id="${entry.id}" data-type="${entry.mediaType}">${escapeHtml(entry.title)}</button>`)
-    .join("");
-
-  container.innerHTML = html;
-
-  [...container.querySelectorAll(".folder-item")].forEach((node) => {
-    node.addEventListener("click", () => {
-      openWatchPage(Number(node.dataset.id), node.dataset.type, 1, 1);
-    });
-  });
-}
-
 function openWatchPage(id, mediaType, season, episode) {
   const url = new URL("./watch.html", window.location.href);
   url.searchParams.set("id", String(id));
@@ -297,8 +398,7 @@ async function initAuth() {
   const supabasePublishableKey = String(config.supabasePublishableKey || config.supabaseAnonKey || "").trim();
 
   if (!supabaseUrl || !supabasePublishableKey) {
-    setAuthHint("Cloud auth is disabled. Add Supabase keys in config.js.");
-    updateCloudState("Cloud sync: off");
+    setAuthHint("Sign in is currently unavailable.");
     renderAuthUI();
     return;
   }
@@ -315,9 +415,9 @@ async function initAuth() {
     state.supabase.auth.onAuthStateChange((_event, session) => {
       state.session = session;
       renderAuthUI();
-      renderBookmarkFolders();
       if (session?.user) {
         pullCloudProgress();
+        queueAutoSync(true);
       }
     });
 
@@ -325,9 +425,8 @@ async function initAuth() {
     if (state.session?.user) {
       await pullCloudProgress();
     }
-  } catch (error) {
-    setAuthHint(`Supabase init failed: ${error.message}`);
-    updateCloudState("Cloud sync: error");
+  } catch {
+    setAuthHint("Sign in is currently unavailable.");
   }
 }
 
@@ -340,10 +439,10 @@ function renderAuthUI() {
   if (signedIn) {
     const user = state.session.user;
     el.authUserEmail.textContent = user.user_metadata?.username || user.email || user.id;
-    updateCloudState("Cloud sync: connected");
-    setAuthHint("Logged in.");
+    setAuthHint("Welcome back.");
+    el.signedInHint.textContent = "You are signed in.";
   } else {
-    updateCloudState(state.cloudEnabled ? "Cloud sync: ready (login required)" : "Cloud sync: off");
+    setAuthHint("Sign in to save your lists.");
   }
 }
 
@@ -365,6 +464,7 @@ async function signIn() {
   }
 
   setAuthHint("Signed in.");
+  closeAuthModal();
 }
 
 async function signUp() {
@@ -401,13 +501,8 @@ async function signOut() {
   setAuthHint("Signed out.");
 }
 
-async function forceSyncNow() {
-  await syncProgressToCloud();
-}
-
 async function syncProgressToCloud() {
   if (!state.session?.user || !state.supabase) {
-    setStatus("Login required for cloud sync.");
     return;
   }
 
@@ -424,7 +519,6 @@ async function syncProgressToCloud() {
   }));
 
   if (!rows.length) {
-    setStatus("No local progress to sync.");
     return;
   }
 
@@ -433,11 +527,11 @@ async function syncProgressToCloud() {
     .upsert(rows, { onConflict: "user_id,media_type,content_id,season_number,episode_number" });
 
   if (error) {
-    setStatus(`Cloud sync failed: ${error.message}`);
+    setStatus("Could not save progress right now.");
     return;
   }
 
-  setStatus("Cloud progress synced.");
+  state.lastSyncAt = Date.now();
 }
 
 async function pullCloudProgress() {
@@ -451,7 +545,7 @@ async function pullCloudProgress() {
     .limit(500);
 
   if (error) {
-    setStatus(`Cloud pull failed: ${error.message}`);
+    setStatus("Could not load saved progress.");
     return;
   }
 
@@ -478,19 +572,90 @@ async function pullCloudProgress() {
 
   localStorage.setItem(progressKey, JSON.stringify(state.progress));
   await hydrateContinueRow();
-  setStatus("Cloud progress loaded.");
+  queueAutoSync(true);
+}
+
+function renderSearchSuggestions(items) {
+  if (!el.searchSuggestions) return;
+  const top = (items || []).slice(0, 8);
+  if (!top.length) {
+    hideSearchSuggestions();
+    return;
+  }
+
+  el.searchSuggestions.innerHTML = top.map((item, index) => {
+    const type = item.mediaType === "movie" ? "Movie" : "TV";
+    const subtitle = [type, item.year, item.popularity ? `Popularity ${Math.round(item.popularity)}` : ""]
+      .filter(Boolean)
+      .join(" | ");
+    const poster = item.poster || "";
+    return `
+      <button class="search-suggestion" type="button" data-id="${item.id}" data-type="${item.mediaType}" style="animation-delay:${index * 35}ms">
+        <img class="search-suggestion-poster" src="${escapeHtml(poster)}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" />
+        <span>
+          <span class="search-suggestion-title">${escapeHtml(item.title)}</span>
+          <span class="search-suggestion-sub">${escapeHtml(subtitle)}</span>
+        </span>
+      </button>
+    `;
+  }).join("");
+
+  [...el.searchSuggestions.querySelectorAll(".search-suggestion")].forEach((node) => {
+    node.addEventListener("click", () => {
+      openWatchPage(Number(node.dataset.id), node.dataset.type, 1, 1);
+    });
+  });
+
+  el.searchSuggestions.removeAttribute("hidden");
+}
+
+function hideSearchSuggestions() {
+  if (!el.searchSuggestions) return;
+  el.searchSuggestions.setAttribute("hidden", "");
+  el.searchSuggestions.innerHTML = "";
+}
+
+function renderSearchResults(items) {
+  if (!el.searchResultsSection || !el.searchResultsGrid) return;
+  const topResults = (items || []).slice(0, 16);
+  if (!topResults.length) {
+    hideSearchResults();
+    return;
+  }
+
+  el.searchResultsSection.removeAttribute("hidden");
+  renderPosterCards(el.searchResultsGrid, topResults);
+}
+
+function hideSearchResults() {
+  if (!el.searchResultsSection || !el.searchResultsGrid) return;
+  el.searchResultsSection.setAttribute("hidden", "");
+  el.searchResultsGrid.innerHTML = "";
+}
+
+function queueAutoSync(immediate = false) {
+  if (!state.session?.user || !state.supabase) return;
+
+  const minGapMs = 15000;
+  const elapsed = Date.now() - state.lastSyncAt;
+  const delay = immediate ? 0 : Math.max(2000, minGapMs - elapsed);
+
+  if (state.autoSyncTimer) {
+    clearTimeout(state.autoSyncTimer);
+  }
+
+  state.autoSyncTimer = window.setTimeout(() => {
+    state.autoSyncTimer = null;
+    syncProgressToCloud();
+  }, delay);
 }
 
 function setStatus(message) {
-  el.statusLine.textContent = message;
+  void message;
 }
 
 function setAuthHint(message) {
   el.authHint.textContent = message;
-}
-
-function updateCloudState(message) {
-  el.cloudState.textContent = message;
 }
 
 function debounce(fn, wait) {
@@ -530,7 +695,85 @@ function escapeHtml(value) {
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+
+  const host = String(window.location.hostname || "").toLowerCase();
+  const isLocalHost = host === "localhost"
+    || host === "127.0.0.1"
+    || host === "0.0.0.0"
+    || host.endsWith(".local")
+    || /^\d+\.\d+\.\d+\.\d+$/.test(host);
+
+  const isKnownProductionHost = host.endsWith("workers.dev") || host.endsWith("netlify.app");
+
+  if (isLocalHost || !isKnownProductionHost) {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations.forEach((registration) => registration.unregister());
+    }).catch(() => {});
+
+    if (window.caches?.keys) {
+      caches.keys().then((keys) => {
+        keys.forEach((key) => {
+          if (key.startsWith("cinerune-static-")) {
+            caches.delete(key);
+          }
+        });
+      }).catch(() => {});
+    }
+
+    return;
+  }
+
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   });
+}
+
+function cssEscape(value) {
+  return String(value || "").replaceAll('"', '\\"');
+}
+
+function openBrowsePage(mode, value, name) {
+  const url = new URL("./browse.html", window.location.href);
+  url.searchParams.set("mode", mode === "country" ? "country" : "genre");
+  url.searchParams.set("value", String(value || ""));
+  if (name) url.searchParams.set("name", String(name));
+  window.location.href = url.toString();
+}
+
+function dedupeExplorerOptions(items, key) {
+  const map = new Map();
+  items.forEach((item) => {
+    const value = String(item?.[key] || "");
+    if (!value) return;
+    if (!map.has(value)) map.set(value, item);
+  });
+  return [...map.values()];
+}
+
+function dedupeById(items) {
+  const map = new Map();
+  items.forEach((item) => {
+    map.set(`${item.mediaType}:${item.id}`, item);
+  });
+  return [...map.values()];
+}
+
+function openAuthModal() {
+  if (!el.authModal) return;
+  el.authModal.removeAttribute("hidden");
+}
+
+function closeAuthModal() {
+  if (!el.authModal) return;
+  el.authModal.setAttribute("hidden", "");
+}
+
+function openMegaMenu() {
+  if (!el.megaMenuPanel) return;
+  el.megaMenuPanel.removeAttribute("hidden");
+}
+
+function closeMegaMenu() {
+  if (!el.megaMenuPanel) return;
+  el.megaMenuPanel.setAttribute("hidden", "");
 }

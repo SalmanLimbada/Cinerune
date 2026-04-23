@@ -7,7 +7,7 @@ import {
   seasonCount,
   titleById,
   posterById
-} from "./catalog.js";
+} from "./catalog.js?v=20260423b";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const settingsKey = "cinerune:settings";
@@ -39,7 +39,6 @@ const el = {
   autoplayInput: document.getElementById("autoplayInput"),
   nextEpisodeInput: document.getElementById("nextEpisodeInput"),
   autoNextSmartInput: document.getElementById("autoNextSmartInput"),
-  syncNowBtn: document.getElementById("syncNowBtn"),
   server1Btn: document.getElementById("server1Btn"),
   server2Btn: document.getElementById("server2Btn"),
   relatedRail: document.getElementById("relatedRail"),
@@ -72,7 +71,9 @@ const state = {
   reports: readJson(reportsKey, []),
   supabase: null,
   session: null,
-  item: null
+  item: null,
+  autoSyncTimer: null,
+  lastSyncAt: 0
 };
 
 boot();
@@ -161,8 +162,10 @@ function bindEvents() {
     submitReport();
   });
 
-  el.syncNowBtn.addEventListener("click", forceSyncNow);
   window.addEventListener("message", onPlayerMessage);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") queueAutoSync(true);
+  });
 }
 
 function hydrateSettingsUI() {
@@ -456,6 +459,7 @@ function onPlayerMessage(event) {
   }
 
   localStorage.setItem(progressKey, JSON.stringify(state.progress));
+  queueAutoSync(data.event === "ended");
 
   if (data.event === "ended" && mediaType === "tv" && state.settings.autoNextSmart) {
     playNextEpisode();
@@ -476,18 +480,19 @@ async function initAuth() {
 
     const { data } = await state.supabase.auth.getSession();
     state.session = data?.session || null;
+    if (state.session?.user) queueAutoSync(true);
 
     state.supabase.auth.onAuthStateChange((_event, session) => {
       state.session = session;
+      if (session?.user) queueAutoSync(true);
     });
   } catch {
     // ignore auth errors on watch page
   }
 }
 
-async function forceSyncNow() {
+async function syncProgressToCloud() {
   if (!state.session?.user || !state.supabase) {
-    setStatus("Sign in from Home to sync.");
     return;
   }
 
@@ -504,7 +509,6 @@ async function forceSyncNow() {
   }));
 
   if (!rows.length) {
-    setStatus("No progress to sync.");
     return;
   }
 
@@ -517,7 +521,24 @@ async function forceSyncNow() {
     return;
   }
 
-  setStatus("Progress synced.");
+  state.lastSyncAt = Date.now();
+}
+
+function queueAutoSync(immediate = false) {
+  if (!state.session?.user || !state.supabase) return;
+
+  const minGapMs = 15000;
+  const elapsed = Date.now() - state.lastSyncAt;
+  const delay = immediate ? 0 : Math.max(1500, minGapMs - elapsed);
+
+  if (state.autoSyncTimer) {
+    clearTimeout(state.autoSyncTimer);
+  }
+
+  state.autoSyncTimer = window.setTimeout(() => {
+    state.autoSyncTimer = null;
+    syncProgressToCloud();
+  }, delay);
 }
 
 function renderStars(score) {

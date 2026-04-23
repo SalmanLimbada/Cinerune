@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browse | Cinerune</title>
+    <meta name="description" content="Cinerune filtered browse page" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="home-body">
+    <div class="home-atmosphere" aria-hidden="true"></div>
+
+    <header class="home-topbar">
+      <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
+      <nav class="home-nav" aria-label="Browse navigation">
+        <a href="./index.html">Home</a>
+      </nav>
+      <a class="pill-btn" href="./index.html">Back</a>
+    </header>
+
+    <main class="home-shell">
+      <section class="home-row">
+        <div class="row-head">
+          <h2 id="browseTitle">Browse</h2>
+        </div>
+      </section>
+
+      <section class="home-row">
+        <div class="row-head compact"><h3>Movies</h3></div>
+        <div id="browseMoviesGrid" class="poster-grid"></div>
+      </section>
+
+      <section class="home-row">
+        <div class="row-head compact"><h3>TV Series</h3></div>
+        <div id="browseTvGrid" class="poster-grid"></div>
+      </section>
+    </main>
+
+    <template id="posterCardTemplate">
+      <article class="poster-card">
+        <button class="poster-btn" type="button">
+          <img class="poster-img" alt="" loading="lazy" decoding="async" />
+          <span class="badge-hd">HD</span>
+          <div class="poster-meta">
+            <h4 class="poster-title"></h4>
+            <p class="poster-sub"></p>
+          </div>
+        </button>
+      </article>
+    </template>
+
+    <script src="config.js"></script>
+    <script src="config.local.js"></script>
+    <script type="module" src="browse.js"></script>
+  </body>
+</html>

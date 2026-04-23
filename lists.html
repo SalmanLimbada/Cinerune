@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Lists | Cinerune</title>
+    <meta name="description" content="Cinerune saved lists" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="home-body">
+    <div class="home-atmosphere" aria-hidden="true"></div>
+
+    <header class="home-topbar">
+      <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
+      <nav class="home-nav" aria-label="Main navigation">
+        <a href="./index.html">Home</a>
+      </nav>
+      <a class="pill-btn" href="./index.html">Back</a>
+    </header>
+
+    <main class="lists-shell">
+      <section class="home-row">
+        <div class="row-head">
+          <h2>My Lists</h2>
+        </div>
+        <p id="listsStatus" class="tiny muted">Loading your saved titles...</p>
+      </section>
+
+      <section class="lists-section">
+        <div class="row-head compact"><h3>Watching</h3></div>
+        <div id="listWatching" class="poster-row"></div>
+      </section>
+
+      <section class="lists-section">
+        <div class="row-head compact"><h3>Watched</h3></div>
+        <div id="listWatched" class="poster-row"></div>
+      </section>
+
+      <section class="lists-section">
+        <div class="row-head compact"><h3>Plan to Watch</h3></div>
+        <div id="listPlan" class="poster-row"></div>
+      </section>
+
+      <section class="lists-section">
+        <div class="row-head compact"><h3>Dropped</h3></div>
+        <div id="listDropped" class="poster-row"></div>
+      </section>
+    </main>
+
+    <template id="posterCardTemplate">
+      <article class="poster-card">
+        <button class="poster-btn" type="button">
+          <img class="poster-img" alt="" loading="lazy" decoding="async" />
+          <span class="badge-hd">HD</span>
+          <div class="poster-meta">
+            <h4 class="poster-title"></h4>
+            <p class="poster-sub"></p>
+          </div>
+        </button>
+      </article>
+    </template>
+
+    <script src="config.js"></script>
+    <script src="config.local.js"></script>
+    <script type="module" src="lists.js"></script>
+  </body>
+</html>

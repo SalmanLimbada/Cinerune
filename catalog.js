@@ -6,6 +6,37 @@ let tmdbConfig = {
 
 const itemCache = new Map();
 const seasonEpisodeCache = new Map();
+const genreCache = {
+  movie: null,
+  tv: null
+};
+let countryCache = null;
+
+const fallbackMovieGenres = [
+  { id: 28, name: "Action" },
+  { id: 12, name: "Adventure" },
+  { id: 16, name: "Animation" },
+  { id: 35, name: "Comedy" },
+  { id: 80, name: "Crime" },
+  { id: 18, name: "Drama" },
+  { id: 27, name: "Horror" },
+  { id: 878, name: "Sci-Fi" },
+  { id: 53, name: "Thriller" },
+  { id: 10749, name: "Romance" }
+];
+
+const fallbackTvGenres = [
+  { id: 10759, name: "Action & Adventure" },
+  { id: 16, name: "Animation" },
+  { id: 35, name: "Comedy" },
+  { id: 80, name: "Crime" },
+  { id: 99, name: "Documentary" },
+  { id: 18, name: "Drama" },
+  { id: 9648, name: "Mystery" },
+  { id: 10764, name: "Reality" },
+  { id: 10765, name: "Sci-Fi & Fantasy" },
+  { id: 10768, name: "War & Politics" }
+];
 
 export let catalog = [];
 
@@ -50,19 +81,44 @@ export async function episodeCount(tvId, season) {
 }
 
 export async function fetchHomeCatalog() {
-  const [trendingAll, trendingTv, popularMovies, nowPlaying] = await Promise.all([
-    tmdbRequest("/trending/all/day"),
-    tmdbRequest("/trending/tv/week"),
-    tmdbRequest("/movie/popular"),
-    tmdbRequest("/movie/now_playing")
+  const randomPage = 1 + Math.floor(Math.random() * 5);
+  const [trendingMovieResult, trendingTvResult, popularMovieResult, popularTvResult] = await Promise.allSettled([
+    tmdbRequest("/trending/movie/week", { page: randomPage }),
+    tmdbRequest("/trending/tv/week", { page: randomPage }),
+    tmdbRequest("/movie/popular", { page: randomPage }),
+    tmdbRequest("/tv/popular", { page: randomPage })
   ]);
 
-  const hero = normalizeItem((trendingAll.results || []).find((item) => item.backdrop_path && item.poster_path));
-  const recommended = normalizeList(trendingTv.results || []);
-  const movies = normalizeList(popularMovies.results || []);
-  const latestMovies = normalizeList(nowPlaying.results || []);
+  const trendingMovies = trendingMovieResult.status === "fulfilled"
+    ? normalizeList(trendingMovieResult.value.results || [])
+    : [];
+  const trendingTv = trendingTvResult.status === "fulfilled"
+    ? normalizeList(trendingTvResult.value.results || [])
+    : [];
 
-  const combined = [...recommended, ...movies, ...latestMovies, ...(hero ? [hero] : [])];
+  const popularMovies = popularMovieResult.status === "fulfilled"
+    ? normalizeList(popularMovieResult.value.results || [])
+    : [];
+  const popularTv = popularTvResult.status === "fulfilled"
+    ? normalizeList(popularTvResult.value.results || [])
+    : [];
+
+  const recommended = dedupeByKey([
+    ...popularMovies,
+    ...popularTv,
+    ...trendingMovies,
+    ...trendingTv
+  ]).sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0));
+
+  const trendingRaw = dedupeByKey([...trendingMovies, ...trendingTv]);
+
+  const trending = trendingRaw.length
+    ? trendingRaw
+    : recommended.slice(0, 24);
+
+  const hero = trending.find((item) => item.backdrop && item.poster) || trending[0] || recommended[0] || null;
+
+  const combined = [...recommended, ...trending, ...(hero ? [hero] : [])];
   cacheItems(combined);
 
   catalog = dedupeByKey(combined);
@@ -70,9 +126,142 @@ export async function fetchHomeCatalog() {
   return {
     hero,
     recommended,
-    movies,
-    latestMovies
+    trending
   };
+}
+
+export async function fetchGenreOptions() {
+  const [movieResult, tvResult] = await Promise.allSettled([fetchGenres("movie"), fetchGenres("tv")]);
+  const movie = movieResult.status === "fulfilled" && movieResult.value.length
+    ? movieResult.value
+    : fallbackMovieGenres;
+  const tv = tvResult.status === "fulfilled" && tvResult.value.length
+    ? tvResult.value
+    : fallbackTvGenres;
+  return {
+    movie,
+    tv
+  };
+}
+
+export async function fetchCountryOptions() {
+  if (countryCache) return countryCache;
+
+  let countries = [];
+  try {
+    const data = await tmdbRequest("/configuration/countries");
+    countries = (data || [])
+      .map((entry) => ({
+        code: String(entry.iso_3166_1 || "").trim().toUpperCase(),
+        name: String(entry.english_name || entry.native_name || "").trim()
+      }))
+      .filter((entry) => entry.code && entry.name)
+      .slice(0, 60);
+  } catch {
+    countries = [
+      { code: "US", name: "United States" },
+      { code: "GB", name: "United Kingdom" },
+      { code: "KR", name: "South Korea" },
+      { code: "JP", name: "Japan" },
+      { code: "IN", name: "India" },
+      { code: "FR", name: "France" },
+      { code: "DE", name: "Germany" },
+      { code: "ES", name: "Spain" },
+      { code: "IT", name: "Italy" },
+      { code: "TR", name: "Turkey" }
+    ];
+  }
+
+  countryCache = countries;
+  return countries;
+}
+
+export async function fetchTitlesByGenre(genreId, page = 1) {
+  const genre = Number(genreId || 0);
+  if (!genre) return { movies: [], tv: [] };
+
+  const [movieData, tvData] = await Promise.all([
+    tmdbRequest("/discover/movie", {
+      with_genres: genre,
+      include_adult: "false",
+      sort_by: "popularity.desc",
+      page
+    }),
+    tmdbRequest("/discover/tv", {
+      with_genres: genre,
+      include_adult: "false",
+      sort_by: "popularity.desc",
+      page
+    })
+  ]);
+
+  const movies = normalizeList(movieData.results || []);
+  const tv = normalizeList(tvData.results || []);
+  cacheItems([...movies, ...tv]);
+  return { movies, tv };
+}
+
+export async function fetchTitlesByCountry(countryCode, page = 1) {
+  const code = String(countryCode || "").trim().toUpperCase();
+  if (!code) return { movies: [], tv: [] };
+
+  const [movieData, tvData] = await Promise.all([
+    tmdbRequest("/discover/movie", {
+      region: code,
+      include_adult: "false",
+      sort_by: "popularity.desc",
+      page
+    }),
+    tmdbRequest("/discover/tv", {
+      with_origin_country: code,
+      include_adult: "false",
+      sort_by: "popularity.desc",
+      page
+    })
+  ]);
+
+  const movies = normalizeList(movieData.results || []);
+  const tv = normalizeList(tvData.results || []);
+  cacheItems([...movies, ...tv]);
+  return { movies, tv };
+}
+
+export async function fetchGenreSections() {
+  const [movieGenres, tvGenres] = await Promise.all([
+    fetchGenres("movie"),
+    fetchGenres("tv")
+  ]);
+
+  const pickMovie = movieGenres.slice(0, 3);
+  const pickTv = tvGenres.slice(0, 3);
+
+  const sectionDefs = [
+    ...pickMovie.map((genre) => ({ ...genre, mediaType: "movie" })),
+    ...pickTv.map((genre) => ({ ...genre, mediaType: "tv" }))
+  ];
+
+  const requests = sectionDefs.map(async (section) => {
+    const path = section.mediaType === "movie" ? "/discover/movie" : "/discover/tv";
+    const data = await tmdbRequest(path, {
+      with_genres: section.id,
+      sort_by: "popularity.desc",
+      include_adult: "false",
+      page: 1
+    });
+
+    const items = normalizeList(data.results || []).slice(0, 18);
+    cacheItems(items);
+
+    return {
+      key: `${section.mediaType}:${section.id}`,
+      title: section.mediaType === "movie" ? `${section.name} Movies` : `${section.name} TV Series`,
+      mediaType: section.mediaType,
+      genreId: section.id,
+      items
+    };
+  });
+
+  return Promise.all(requests);
 }
 
 export async function searchCatalog(query) {
@@ -80,7 +269,8 @@ export async function searchCatalog(query) {
   if (!text) return { movies: [], tv: [] };
 
   const data = await tmdbRequest("/search/multi", { query: text, include_adult: "false" });
-  const normalized = normalizeList(data.results || []);
+  const normalized = normalizeList(data.results || [])
+    .sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0));
   cacheItems(normalized);
 
   return {
@@ -135,7 +325,7 @@ export async function fetchItemsByIds(entries = []) {
 function normalizeList(results) {
   return results
     .map((item) => normalizeItem(item))
-    .filter((item) => item && item.poster && item.title);
+    .filter((item) => item && item.title && (item.poster || item.backdrop));
 }
 
 function normalizeItem(item) {
@@ -165,7 +355,11 @@ function normalizeItem(item) {
     mediaType,
     title: title || `Title ${id}`,
     year,
-    poster: posterPath ? `https://image.tmdb.org/t/p/w500${posterPath}` : "",
+    poster: posterPath
+      ? `https://image.tmdb.org/t/p/w500${posterPath}`
+      : backdropPath
+        ? `https://image.tmdb.org/t/p/w780${backdropPath}`
+        : "",
     backdrop: backdropPath ? `https://image.tmdb.org/t/p/original${backdropPath}` : "",
     genre,
     runtime: runtimeMinutes > 0 ? `${runtimeMinutes} min` : "",
@@ -174,6 +368,7 @@ function normalizeItem(item) {
       ? Number(item.vote_average).toFixed(1)
       : "",
     released: date || "",
+    popularity: Number(item.popularity || 0),
     totalSeasons: Number(item.number_of_seasons || 0) || undefined,
     defaultSeason: 1,
     defaultEpisode: 1
@@ -220,6 +415,25 @@ async function tmdbRequest(path, params = {}) {
   }
 
   return response.json();
+}
+
+async function fetchGenres(mediaType) {
+  const normalized = mediaType === "tv" ? "tv" : "movie";
+  if (genreCache[normalized]) return genreCache[normalized];
+
+  let genres = [];
+  try {
+    const data = await tmdbRequest(`/genre/${normalized}/list`);
+    genres = (data?.genres || [])
+      .map((genre) => ({ id: Number(genre.id), name: String(genre.name || "").trim() }))
+      .filter((genre) => genre.id > 0 && genre.name)
+      .slice(0, 20);
+  } catch {
+    genres = normalized === "tv" ? fallbackTvGenres : fallbackMovieGenres;
+  }
+
+  genreCache[normalized] = genres;
+  return genres;
 }
 
 function parseYear(value) {

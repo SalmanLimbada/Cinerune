@@ -43,3 +43,21 @@ Cinerune focuses on clarity first:
 - Easy resume without technical friction
 - Consistent cross-device account behavior
 - Cleaner UI with obvious sections and controls
+
+## Local Setup (Safe)
+
+1. Keep `config.js` committed with blank values.
+2. Copy `config.local.example.js` to `config.local.js`.
+3. Put your own local TMDB and Supabase values in `config.local.js`.
+4. `config.local.js` is ignored by git, so your local secrets do not get pushed.
+
+## Run Locally In Ubuntu WSL
+
+Use a local HTTP server (not file://) so ES modules work correctly:
+
+```bash
+cd "/mnt/c/Users/salma/Downloads/VS Code/Cinerune"
+python3 -m http.server 5173
+```
+
+Then open `http://localhost:5173` in your browser.
