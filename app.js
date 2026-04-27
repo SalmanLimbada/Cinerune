@@ -9,6 +9,7 @@ const searchCatalog = catalogApi.searchCatalog;
 const titleById = catalogApi.titleById;
 const posterById = catalogApi.posterById;
 const fetchItemsByIds = catalogApi.fetchItemsByIds;
+const fetchRecommendedFromHistory = catalogApi.fetchRecommendedFromHistory || (async () => []);
 
 const progressKey = "cinerune:progress";
 const bookmarksKey = "cinerune:bookmarks";
@@ -62,6 +63,7 @@ const el = {
   continueGrid: document.getElementById("continueGrid"),
   recommendedGrid: document.getElementById("recommendedGrid"),
   trendingGrid: document.getElementById("trendingGrid"),
+  popularGrid: document.getElementById("popularGrid"),
   searchInput: document.getElementById("searchInput"),
   searchSuggestions: document.getElementById("searchSuggestions"),
   searchResultsSection: document.getElementById("searchResultsSection"),
@@ -78,7 +80,8 @@ const state = {
   homeData: {
     hero: null,
     recommended: [],
-    trending: []
+    trending: [],
+    popular: []
   },
   genreOptions: [],
   countryOptions: [],
@@ -259,8 +262,9 @@ async function refreshHome() {
   }
 
   state.homeData.hero = homeData.hero || null;
-  state.homeData.recommended = homeData.recommended || [];
+  state.homeData.recommended = await buildRecommendedRow(homeData);
   state.homeData.trending = homeData.trending || [];
+  state.homeData.popular = homeData.popular || [];
 
   const genreData = genresResult.status === "fulfilled" ? genresResult.value : { movie: [], tv: [] };
   state.genreOptions = dedupeExplorerOptions([...(genreData.movie || []), ...(genreData.tv || [])], "id");
@@ -269,6 +273,7 @@ async function refreshHome() {
   renderHero();
   renderRecommended();
   renderTrending();
+  renderPopular();
   renderMegaMenu();
   startHeroRotation();
 }
@@ -284,6 +289,7 @@ function renderUnavailableState() {
 
   el.recommendedGrid.innerHTML = "";
   el.trendingGrid.innerHTML = "";
+  if (el.popularGrid) el.popularGrid.innerHTML = "";
   if (el.megaMenuGrid) el.megaMenuGrid.innerHTML = "";
 }
 
@@ -336,6 +342,11 @@ function renderRecommended() {
 function renderTrending() {
   if (!el.trendingGrid) return;
   renderPosterCards(el.trendingGrid, (state.homeData.trending || []).slice(0, 24));
+}
+
+function renderPopular() {
+  if (!el.popularGrid) return;
+  renderPosterCards(el.popularGrid, (state.homeData.popular || []).slice(0, 24));
 }
 
 function renderMegaMenu() {
@@ -435,6 +446,36 @@ function renderPosterCards(container, items, options = {}) {
   });
 
   container.appendChild(fragment);
+}
+
+async function buildRecommendedRow(homeData) {
+  const historyEntries = collectRecommendationHistory();
+  if (!historyEntries.length) {
+    return (homeData.recommended || []).slice(0, 24);
+  }
+
+  try {
+    const personalized = await fetchRecommendedFromHistory(historyEntries, 24);
+    if (personalized.length) {
+      return personalized;
+    }
+  } catch {
+    // fall back to non-personalized home data
+  }
+
+  return (homeData.recommended || []).slice(0, 24);
+}
+
+function collectRecommendationHistory() {
+  const progressEntries = Object.values(state.progress || {})
+    .filter((entry) => Number(entry.progress || 0) > 10 || Number(entry.timestamp || 0) > 300)
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+
+  const bookmarkEntries = Object.values(state.bookmarks || {})
+    .filter((entry) => entry?.status === "watching" || entry?.status === "watched")
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+
+  return [...progressEntries, ...bookmarkEntries];
 }
 
 function openWatchPage(id, mediaType, season, episode) {

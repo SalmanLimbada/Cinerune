@@ -103,22 +103,30 @@ export async function fetchHomeCatalog() {
     ? normalizeList(popularTvResult.value.results || [])
     : [];
 
-  const recommended = dedupeByKey([
-    ...popularMovies,
-    ...popularTv,
-    ...trendingMovies,
-    ...trendingTv
-  ]).sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0));
-
   const trendingRaw = dedupeByKey([...trendingMovies, ...trendingTv]);
+  const popularRaw = dedupeByKey([...popularMovies, ...popularTv]);
+
+  const recommended = dedupeByKey([
+    ...popularRaw,
+    ...trendingRaw
+  ]).sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0));
 
   const trending = trendingRaw.length
     ? trendingRaw
     : recommended.slice(0, 24);
 
-  const hero = trending.find((item) => item.backdrop && item.poster) || trending[0] || recommended[0] || null;
+  const popular = popularRaw.length
+    ? popularRaw
+    : recommended.slice(0, 24);
 
-  const combined = [...recommended, ...trending, ...(hero ? [hero] : [])];
+  const hero = trending.find((item) => item.backdrop && item.poster)
+    || popular.find((item) => item.backdrop && item.poster)
+    || trending[0]
+    || popular[0]
+    || recommended[0]
+    || null;
+
+  const combined = [...recommended, ...trending, ...popular, ...(hero ? [hero] : [])];
   cacheItems(combined);
 
   catalog = dedupeByKey(combined);
@@ -126,8 +134,75 @@ export async function fetchHomeCatalog() {
   return {
     hero,
     recommended,
-    trending
+    trending,
+    popular
   };
+}
+
+export async function fetchRecommendedFromHistory(entries = [], limit = 24) {
+  const seeds = dedupeHistoryEntries(entries).slice(0, 12);
+  if (!seeds.length) return [];
+
+  const hydratedSeeds = (await Promise.all(seeds.map(async (entry) => {
+    const mediaType = entry.mediaType === "tv" ? "tv" : "movie";
+    const id = Number(entry.id || 0);
+    if (!id) return null;
+
+    try {
+      return getItemById(id, mediaType) || await fetchItemDetailsById(id, mediaType);
+    } catch {
+      return getItemById(id, mediaType) || null;
+    }
+  }))).filter(Boolean);
+
+  if (!hydratedSeeds.length) return [];
+
+  const genreWeights = new Map();
+  const seenKeys = new Set(seeds.map((entry) => `${entry.mediaType === "tv" ? "tv" : "movie"}:${Number(entry.id || 0)}`));
+
+  hydratedSeeds.forEach((item, index) => {
+    const recencyBoost = Math.max(1, hydratedSeeds.length - index);
+    const popularityBoost = Math.max(1, Math.round(Number(item.popularity || 0) / 50));
+    const weight = recencyBoost + popularityBoost;
+    (item.genreIds || []).forEach((genreId) => {
+      genreWeights.set(genreId, (genreWeights.get(genreId) || 0) + weight);
+    });
+  });
+
+  const topGenres = [...genreWeights.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([genreId]) => genreId);
+
+  if (!topGenres.length) return [];
+
+  const preferredMediaType = pickPreferredMediaType(seeds);
+  const requestTypes = preferredMediaType === "mixed"
+    ? ["movie", "tv"]
+    : [preferredMediaType, preferredMediaType === "movie" ? "tv" : "movie"];
+
+  const requests = [];
+  requestTypes.forEach((mediaType) => {
+    topGenres.slice(0, 3).forEach((genreId, index) => {
+      requests.push(
+        tmdbRequest(mediaType === "movie" ? "/discover/movie" : "/discover/tv", {
+          with_genres: genreId,
+          include_adult: "false",
+          sort_by: "popularity.desc",
+          page: index + 1
+        }).catch(() => ({ results: [] }))
+      );
+    });
+  });
+
+  const responseSets = await Promise.all(requests);
+  const candidates = dedupeByKey(responseSets.flatMap((result) => normalizeList(result.results || [])))
+    .filter((item) => !seenKeys.has(`${item.mediaType}:${item.id}`))
+    .sort((a, b) => scoreRecommendationCandidate(b, genreWeights, preferredMediaType) - scoreRecommendationCandidate(a, genreWeights, preferredMediaType))
+    .slice(0, limit);
+
+  cacheItems(candidates);
+  return candidates;
 }
 
 export async function fetchGenreOptions() {
@@ -345,6 +420,11 @@ function normalizeItem(item) {
     : Array.isArray(item.genre_ids)
       ? mapGenreIds(item.genre_ids, mediaType)
       : "";
+  const genreIds = Array.isArray(item.genres)
+    ? item.genres.map((entry) => Number(entry.id)).filter((id) => id > 0)
+    : Array.isArray(item.genre_ids)
+      ? item.genre_ids.map((id) => Number(id)).filter((id) => id > 0)
+      : [];
 
   const runtimeMinutes = mediaType === "movie"
     ? Number(item.runtime || 0)
@@ -362,6 +442,7 @@ function normalizeItem(item) {
         : "",
     backdrop: backdropPath ? `https://image.tmdb.org/t/p/original${backdropPath}` : "",
     genre,
+    genreIds,
     runtime: runtimeMinutes > 0 ? `${runtimeMinutes} min` : "",
     plot: String(item.overview || "").trim(),
     rating: Number.isFinite(Number(item.vote_average)) && Number(item.vote_average) > 0
@@ -464,4 +545,43 @@ function mapGenreIds(ids, mediaType) {
   const map = mediaType === "tv" ? tvGenres : movieGenres;
   const names = ids.map((id) => map[id]).filter(Boolean);
   return names.slice(0, 3).join(", ");
+}
+
+function dedupeHistoryEntries(entries) {
+  const map = new Map();
+  entries.forEach((entry) => {
+    const mediaType = entry?.mediaType === "tv" ? "tv" : "movie";
+    const id = Number(entry?.id || 0);
+    if (!id) return;
+    const season = Number(entry?.season || 1);
+    const episode = Number(entry?.episode || 1);
+    const updatedAt = Number(entry?.updatedAt || 0);
+    const progress = Number(entry?.progress || 0);
+    const score = updatedAt + progress * 1000;
+    const key = `${mediaType}:${id}:${mediaType === "tv" ? `${season}:${episode}` : "movie"}`;
+    const previous = map.get(key);
+    if (!previous || score > previous.score) {
+      map.set(key, { ...entry, mediaType, id, score });
+    }
+  });
+
+  return [...map.values()].sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+}
+
+function pickPreferredMediaType(entries) {
+  let movieCount = 0;
+  let tvCount = 0;
+  entries.forEach((entry) => {
+    if (entry.mediaType === "tv") tvCount += 1;
+    else movieCount += 1;
+  });
+
+  if (movieCount === tvCount) return "mixed";
+  return movieCount > tvCount ? "movie" : "tv";
+}
+
+function scoreRecommendationCandidate(item, genreWeights, preferredMediaType) {
+  const genreScore = (item.genreIds || []).reduce((sum, genreId) => sum + Number(genreWeights.get(genreId) || 0), 0);
+  const mediaTypeBoost = preferredMediaType === "mixed" || preferredMediaType === item.mediaType ? 20 : 0;
+  return genreScore + mediaTypeBoost + Number(item.popularity || 0);
 }
