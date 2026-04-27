@@ -46,11 +46,12 @@ const el = {
   autoNextSmartInput: document.getElementById("autoNextSmartInput"),
   server1Btn: document.getElementById("server1Btn"),
   server2Btn: document.getElementById("server2Btn"),
+  episodeGrid: document.getElementById("episodeGrid"),
   relatedRail: document.getElementById("relatedRail"),
   relatedPrevBtn: document.getElementById("relatedPrevBtn"),
   relatedNextBtn: document.getElementById("relatedNextBtn"),
   bookmarkTrigger: document.getElementById("bookmarkTrigger"),
-  bookmarkCurrent: document.getElementById("bookmarkCurrent"),
+  bookmarkToast: document.getElementById("bookmarkToast"),
   bookmarkMenu: document.getElementById("bookmarkMenu"),
   reportTrigger: document.getElementById("reportTrigger"),
   reportDialog: document.getElementById("reportDialog"),
@@ -118,11 +119,11 @@ function bindEvents() {
 
   el.prevEpisodeBtn.addEventListener("click", playPrevEpisode);
   el.nextEpisodeBtn.addEventListener("click", playNextEpisode);
-  el.playSelectedBtn.addEventListener("click", playSelectedEpisode);
 
   el.seasonSelect.addEventListener("change", async () => {
     state.season = Number(el.seasonSelect.value) || 1;
-    await refillEpisodeSelect();
+    state.episode = 1;
+    await refillEpisodeGrid();
   });
 
   el.server1Btn.addEventListener("click", () => switchServer(1));
@@ -244,27 +245,39 @@ async function hydrateEpisodeControls() {
     el.seasonSelect.appendChild(option);
   }
 
-  await refillEpisodeSelect();
+  await refillEpisodeGrid();
 }
 
-async function refillEpisodeSelect() {
-  el.episodeSelect.innerHTML = "";
+async function refillEpisodeGrid() {
+  if (!el.episodeGrid) return;
   const totalEpisodes = await episodeCount(state.id, state.season);
 
+  el.episodeGrid.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+
   for (let episode = 1; episode <= totalEpisodes; episode += 1) {
-    const option = document.createElement("option");
-    option.value = String(episode);
-    option.textContent = `Episode ${episode}`;
-    option.selected = episode === state.episode;
-    el.episodeSelect.appendChild(option);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "episode-pill";
+    button.dataset.episode = String(episode);
+    button.textContent = `EP${episode}: Episode ${episode}`;
+    button.classList.toggle("active", episode === state.episode);
+    button.addEventListener("click", () => playEpisode(episode));
+    fragment.appendChild(button);
   }
+
+  el.episodeGrid.appendChild(fragment);
 
   el.episodeCountText.textContent = `Season ${state.season} has ${totalEpisodes} episodes.`;
 }
 
-function playSelectedEpisode() {
-  state.season = Number(el.seasonSelect.value) || 1;
-  state.episode = Number(el.episodeSelect.value) || 1;
+function playEpisode(episode) {
+  state.episode = Number(episode) || 1;
+  if (el.episodeGrid) {
+    [...el.episodeGrid.querySelectorAll(".episode-pill")].forEach((node) => {
+      node.classList.toggle("active", Number(node.dataset.episode) === state.episode);
+    });
+  }
   loadPlayer();
 }
 
@@ -393,8 +406,19 @@ async function renderRelated() {
 
 function saveBookmark(status) {
   if (!state.item) return;
-  const normalizedStatus = ["watching", "watched", "plan", "dropped"].includes(status) ? status : "watching";
   const key = `${state.mediaType}:${state.id}`;
+  const current = state.bookmarks[key] || null;
+
+  if (status === "clear" || current?.status === status) {
+    delete state.bookmarks[key];
+    localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+    syncBookmarkButton();
+    showBookmarkToast("Removed");
+    setStatus("Bookmark removed.");
+    return;
+  }
+
+  const normalizedStatus = ["watching", "watched", "plan", "dropped"].includes(status) ? status : "watching";
 
   state.bookmarks[key] = {
     id: state.id,
@@ -407,6 +431,7 @@ function saveBookmark(status) {
 
   localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
   syncBookmarkButton();
+  showBookmarkToast(`Marked ${labelForStatus(normalizedStatus)}`);
   setStatus(`Saved to ${labelForStatus(normalizedStatus)}.`);
 }
 
@@ -440,9 +465,6 @@ function syncBookmarkButton() {
   if (!el.bookmarkTrigger || !el.bookmarkMenu || !state.item) return;
 
   const current = state.bookmarks[`${state.mediaType}:${state.id}`] || null;
-  if (el.bookmarkCurrent) {
-    el.bookmarkCurrent.textContent = current?.status ? `Saved as ${labelForStatus(current.status)}` : "Not saved";
-  }
   el.bookmarkTrigger.textContent = "Bookmark";
   el.bookmarkTrigger.classList.toggle("active", Boolean(current) || !el.bookmarkMenu.hasAttribute("hidden"));
   el.bookmarkTrigger.setAttribute("aria-expanded", el.bookmarkMenu.hasAttribute("hidden") ? "false" : "true");
@@ -450,6 +472,16 @@ function syncBookmarkButton() {
   [...el.bookmarkMenu.querySelectorAll(".bookmark-option")].forEach((node) => {
     node.classList.toggle("active", node.dataset.status === current?.status);
   });
+}
+
+function showBookmarkToast(message) {
+  if (!el.bookmarkToast) return;
+  el.bookmarkToast.textContent = message;
+  el.bookmarkToast.removeAttribute("hidden");
+  window.clearTimeout(showBookmarkToast.timer);
+  showBookmarkToast.timer = window.setTimeout(() => {
+    if (el.bookmarkToast) el.bookmarkToast.setAttribute("hidden", "");
+  }, 1200);
 }
 
 function onPlayerMessage(event) {

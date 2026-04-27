@@ -51,12 +51,13 @@
           <div class="right-controls">
             <div class="dropdown" id="bookmarkDropdown">
               <button id="bookmarkTrigger" class="control-btn" type="button">Bookmark</button>
-              <span id="bookmarkCurrent" class="bookmark-current">Not saved</span>
+              <span id="bookmarkToast" class="bookmark-toast" hidden></span>
               <div id="bookmarkMenu" class="dropdown-menu" hidden>
                 <button class="bookmark-option" data-status="watching" type="button">Watching</button>
                 <button class="bookmark-option" data-status="watched" type="button">Watched</button>
                 <button class="bookmark-option" data-status="plan" type="button">Plan to Watch</button>
                 <button class="bookmark-option" data-status="dropped" type="button">Dropped</button>
+                <button class="bookmark-option bookmark-clear" data-status="clear" type="button">Remove Bookmark</button>
               </div>
             </div>
             <button id="reportTrigger" class="control-btn" type="button">Report</button>
@@ -76,10 +77,7 @@
             <select id="seasonSelect"></select>
           </div>
           <p id="episodeCountText" class="tiny muted"></p>
-          <div class="episode-row">
-            <select id="episodeSelect"></select>
-            <button id="playSelectedBtn" class="pill-btn" type="button">Play Episode</button>
-          </div>
+          <div id="episodeGrid" class="episode-grid"></div>
         </section>
 
         <section class="home-row related-row">
@@ -122,10 +120,6 @@
         </div>
       </form>
     </dialog>
-
-    <input id="colorInput" type="hidden" value="45b7ff" />
-    <input id="nextEpisodeInput" type="hidden" />
-    <button id="saveSettingsBtn" type="button" hidden>Save</button>
 
     <script src="config.js"></script>
     <script>
