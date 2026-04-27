@@ -21,6 +21,10 @@ function getBookmarksKey(session) {
 }
 
 const el = {
+  watchAccountMenuWrap: document.getElementById("watchAccountMenuWrap"),
+  watchAccountBtn: document.getElementById("watchAccountBtn"),
+  watchAccountMenu: document.getElementById("watchAccountMenu"),
+  watchAccountSettings: document.getElementById("watchAccountSettings"),
   watchTagline: document.getElementById("watchTagline"),
   watchTitle: document.getElementById("watchTitle"),
   watchMeta: document.getElementById("watchMeta"),
@@ -132,6 +136,23 @@ function bindEvents() {
   el.server1Btn.addEventListener("click", () => switchServer(1));
   el.server2Btn.addEventListener("click", () => switchServer(2));
 
+  if (el.watchAccountBtn) {
+    el.watchAccountBtn.addEventListener("click", () => {
+      if (state.session?.user) {
+        toggleWatchAccountMenu();
+      } else {
+          window.location.href = "./index.html?auth=login";
+      }
+    });
+  }
+
+  if (el.watchAccountSettings) {
+    el.watchAccountSettings.addEventListener("click", () => {
+      closeWatchAccountMenu();
+        window.location.href = "./index.html?modal=settings";
+    });
+  }
+
   el.relatedPrevBtn.addEventListener("click", () => {
     el.relatedRail.scrollBy({ left: -320, behavior: "smooth" });
   });
@@ -160,6 +181,9 @@ function bindEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    if (el.watchAccountMenuWrap && !el.watchAccountMenuWrap.contains(event.target)) {
+      closeWatchAccountMenu();
+    }
     if (!el.bookmarkMenu.contains(event.target) && !el.bookmarkTrigger.contains(event.target)) {
       el.bookmarkMenu.setAttribute("hidden", "");
       el.bookmarkTrigger.classList.remove("active");
@@ -550,16 +574,49 @@ async function initAuth() {
     const { data } = await state.supabase.auth.getSession();
     state.session = data?.session || null;
     if (state.session?.user) queueAutoSync(true);
+    renderWatchAccountUI();
 
     state.supabase.auth.onAuthStateChange((_event, session) => {
       state.session = session;
       state.bookmarks = readJson(getBookmarksKey(session), {});
       syncBookmarkButton();
+      renderWatchAccountUI();
       if (session?.user) queueAutoSync(true);
     });
   } catch {
     // ignore auth errors on watch page
   }
+}
+
+function renderWatchAccountUI() {
+  if (!el.watchAccountBtn) return;
+
+  if (state.session?.user) {
+    const username = state.session.user.user_metadata?.username || state.session.user.email || "Account";
+    el.watchAccountBtn.textContent = username;
+    el.watchAccountBtn.classList.add("active");
+  } else {
+    el.watchAccountBtn.textContent = "Login";
+    el.watchAccountBtn.classList.remove("active");
+    closeWatchAccountMenu();
+  }
+}
+
+function toggleWatchAccountMenu() {
+  if (!el.watchAccountMenu) return;
+  const hidden = el.watchAccountMenu.hasAttribute("hidden");
+  if (hidden) {
+    el.watchAccountMenu.removeAttribute("hidden");
+    el.watchAccountBtn?.setAttribute("aria-expanded", "true");
+  } else {
+    closeWatchAccountMenu();
+  }
+}
+
+function closeWatchAccountMenu() {
+  if (!el.watchAccountMenu) return;
+  el.watchAccountMenu.setAttribute("hidden", "");
+  el.watchAccountBtn?.setAttribute("aria-expanded", "false");
 }
 
 async function syncProgressToCloud() {

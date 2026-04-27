@@ -90,6 +90,9 @@ const state = {
 };
 
 let selectedAvatarId = readJson("cinerune:avatar-choice", "orbit");
+let authModalMode = "login";
+const startupQuery = new URLSearchParams(window.location.search);
+const startupAuthMode = startupQuery.get("auth") || startupQuery.get("modal");
 
 boot();
 
@@ -105,6 +108,13 @@ async function boot() {
   await initAuth();
   await refreshHome();
   await hydrateContinueRow();
+
+  if (startupAuthMode === "settings" && state.session?.user) {
+    openAuthModal(true);
+  } else if (startupAuthMode === "login") {
+    openAuthModal(false);
+  }
+
   registerServiceWorker();
 }
 
@@ -481,8 +491,14 @@ async function initAuth() {
 
 function renderAuthUI() {
   const signedIn = Boolean(state.session?.user);
-  el.signedOutView.toggleAttribute("hidden", signedIn);
-  el.signedInView.toggleAttribute("hidden", !signedIn);
+  const settingsMode = authModalMode === "settings";
+  if (settingsMode) {
+    el.signedOutView.setAttribute("hidden", "");
+    el.signedInView.removeAttribute("hidden");
+  } else {
+    el.signedOutView.toggleAttribute("hidden", signedIn);
+    el.signedInView.toggleAttribute("hidden", !signedIn);
+  }
 
   if (signedIn) {
     const user = state.session.user;
@@ -493,6 +509,21 @@ function renderAuthUI() {
     renderActiveAvatar(avatarId);
     renderAccountButton(avatarId, "Account");
     if (el.toggleAuth) el.toggleAuth.title = "Open account menu";
+    if (settingsMode) {
+      const signedInProfile = el.signedInView.querySelector(".signed-in-profile");
+      const signedInHint = el.signedInView.querySelector("#signedInHint");
+      if (signedInProfile) signedInProfile.setAttribute("hidden", "");
+      if (signedInHint) signedInHint.setAttribute("hidden", "");
+      const authTitle = el.authModal?.querySelector("#authTitle");
+      if (authTitle) authTitle.textContent = "Settings";
+    } else {
+      const signedInProfile = el.signedInView.querySelector(".signed-in-profile");
+      const signedInHint = el.signedInView.querySelector("#signedInHint");
+      if (signedInProfile) signedInProfile.removeAttribute("hidden");
+      if (signedInHint) signedInHint.removeAttribute("hidden");
+      const authTitle = el.authModal?.querySelector("#authTitle");
+      if (authTitle) authTitle.textContent = "Welcome Back";
+    }
     setAuthHint("Welcome back.");
     el.signedInHint.textContent = "You are signed in.";
   } else {
@@ -667,7 +698,9 @@ function closeAccountMenu() {
 
 function openAuthModal(_settingsMode = false) {
   if (!el.authModal) return;
+  authModalMode = _settingsMode ? "settings" : "login";
   el.authModal.removeAttribute("hidden");
+  renderAuthUI();
 }
 
 async function syncProgressToCloud() {

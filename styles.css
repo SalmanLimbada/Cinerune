@@ -787,6 +787,7 @@ body {
 }
 
 .dropdown[hidden],
+.dropdown-menu[hidden],
 .account-menu[hidden] {
   display: none !important;
 }
