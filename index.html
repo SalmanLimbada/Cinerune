@@ -22,17 +22,31 @@
         <button id="showCountryExplorer" class="chip" type="button">Countries</button>
       </nav>
 
-      <a class="pill-btn ghost" href="./lists.html">My Lists</a>
-      <div id="accountMenuWrap" class="account-menu-wrap">
-        <button id="toggleAuth" class="pill-btn account-pill" type="button">
-          <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" />
-          <span id="authButtonLabel">Login</span>
-        </button>
-        <div id="accountMenu" class="account-menu" hidden>
-          <button id="openAccountSettings" class="account-menu-item" type="button">Settings</button>
-          <a class="account-menu-item" href="./lists.html">My Lists</a>
-          <a id="continueWatchingLink" class="account-menu-item" href="./index.html#continueSection">Continue Watching</a>
-          <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">Sign Out</button>
+      <div class="header-actions">
+        <a class="pill-btn ghost" href="./lists.html">My Lists</a>
+        <div id="notificationsWrap" class="account-menu-wrap" hidden>
+          <button id="notificationsBtn" class="icon-pill" type="button" aria-label="Notifications" aria-expanded="false">
+            <span class="notif-icon" aria-hidden="true">&#128276;</span>
+            <span id="notificationsBadge" class="notif-badge" hidden>0</span>
+          </button>
+          <div id="notificationsMenu" class="account-menu notifications-menu" hidden>
+            <div class="notifications-head">
+              <strong>Notifications</strong>
+            </div>
+            <div id="notificationsList" class="notifications-list"></div>
+          </div>
+        </div>
+        <div id="accountMenuWrap" class="account-menu-wrap">
+          <button id="toggleAuth" class="pill-btn account-pill" type="button">
+            <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" />
+            <span id="authButtonLabel">Login</span>
+          </button>
+          <div id="accountMenu" class="account-menu" hidden>
+            <button id="openAccountSettings" class="account-menu-item" type="button">Settings</button>
+            <a class="account-menu-item" href="./lists.html">My Lists</a>
+            <a id="continueWatchingLink" class="account-menu-item" href="./index.html#continueSection">Continue Watching</a>
+            <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">Sign Out</button>
+          </div>
         </div>
       </div>
     </header>
@@ -173,6 +187,6 @@
         document.head.appendChild(script);
       })();
     </script>
-    <script type="module" src="app.js?v=20260427d"></script>
+    <script type="module" src="app.js?v=20260427e"></script>
   </body>
 </html>

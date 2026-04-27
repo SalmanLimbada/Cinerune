@@ -339,16 +339,27 @@ export async function fetchGenreSections() {
   return Promise.all(requests);
 }
 
-export async function searchCatalog(query) {
+export async function searchCatalog(query, options = {}) {
   const text = String(query || "").trim();
-  if (!text) return { movies: [], tv: [] };
+  if (!text) return { all: [], movies: [], tv: [] };
 
-  const data = await tmdbRequest("/search/multi", { query: text, include_adult: "false" });
-  const normalized = normalizeList(data.results || [])
-    .sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0));
+  const requestedPages = Math.max(1, Math.min(5, Number(options.pages || 1)));
+  const responses = await Promise.all(
+    Array.from({ length: requestedPages }, (_unused, index) =>
+      tmdbRequest("/search/multi", {
+        query: text,
+        include_adult: "false",
+        page: index + 1
+      }).catch(() => ({ results: [] }))
+    )
+  );
+
+  const normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [])))
+    .sort((a, b) => scoreSearchResult(b, text) - scoreSearchResult(a, text));
   cacheItems(normalized);
 
   return {
+    all: normalized,
     movies: normalized.filter((item) => item.mediaType === "movie"),
     tv: normalized.filter((item) => item.mediaType === "tv")
   };
@@ -429,6 +440,8 @@ function normalizeItem(item) {
   const runtimeMinutes = mediaType === "movie"
     ? Number(item.runtime || 0)
     : Number((item.episode_run_time || [])[0] || 0);
+  const latestEpisode = item.last_episode_to_air || null;
+  const nextEpisode = item.next_episode_to_air || null;
 
   return {
     id,
@@ -450,6 +463,15 @@ function normalizeItem(item) {
       : "",
     released: date || "",
     popularity: Number(item.popularity || 0),
+    latestEpisodeSeason: Number(latestEpisode?.season_number || 0) || undefined,
+    latestEpisodeNumber: Number(latestEpisode?.episode_number || 0) || undefined,
+    latestEpisodeName: String(latestEpisode?.name || "").trim(),
+    latestEpisodeAirDate: String(latestEpisode?.air_date || "").trim(),
+    nextEpisodeSeason: Number(nextEpisode?.season_number || 0) || undefined,
+    nextEpisodeNumber: Number(nextEpisode?.episode_number || 0) || undefined,
+    nextEpisodeName: String(nextEpisode?.name || "").trim(),
+    nextEpisodeAirDate: String(nextEpisode?.air_date || "").trim(),
+    totalEpisodes: Number(item.number_of_episodes || 0) || undefined,
     totalSeasons: Number(item.number_of_seasons || 0) || undefined,
     defaultSeason: 1,
     defaultEpisode: 1
@@ -584,4 +606,33 @@ function scoreRecommendationCandidate(item, genreWeights, preferredMediaType) {
   const genreScore = (item.genreIds || []).reduce((sum, genreId) => sum + Number(genreWeights.get(genreId) || 0), 0);
   const mediaTypeBoost = preferredMediaType === "mixed" || preferredMediaType === item.mediaType ? 20 : 0;
   return genreScore + mediaTypeBoost + Number(item.popularity || 0);
+}
+
+function scoreSearchResult(item, query) {
+  const normalizedQuery = normalizeSearchText(query);
+  const normalizedTitle = normalizeSearchText(item.title);
+  const words = normalizedQuery.split(" ").filter(Boolean);
+
+  let score = Number(item.popularity || 0);
+
+  if (normalizedTitle === normalizedQuery) score += 10000;
+  if (normalizedTitle.startsWith(normalizedQuery)) score += 4500;
+  if (normalizedTitle.includes(normalizedQuery)) score += 2500;
+
+  const matchedWords = words.filter((word) => normalizedTitle.includes(word)).length;
+  score += matchedWords * 500;
+
+  if (item.mediaType === "tv") score += 120;
+  if (item.year) score += Math.max(0, Number(item.year) - 1980) * 2;
+
+  return score;
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

@@ -10,9 +10,11 @@ const titleById = catalogApi.titleById;
 const posterById = catalogApi.posterById;
 const fetchItemsByIds = catalogApi.fetchItemsByIds;
 const fetchRecommendedFromHistory = catalogApi.fetchRecommendedFromHistory || (async () => []);
+const fetchItemDetailsById = catalogApi.fetchItemDetailsById;
 
-const progressKey = "cinerune:progress";
-const bookmarksKey = "cinerune:bookmarks";
+const legacyProgressKey = "cinerune:progress";
+const progressBaseKey = "cinerune:progress";
+const bookmarksBaseKey = "cinerune:bookmarks";
 const homeCacheKey = "cinerune:home-cache";
 const avatarOptions = [
   { id: "orbit", label: "Orbit", color: "#7ad8ff" },
@@ -24,6 +26,11 @@ const avatarOptions = [
 ];
 
 const el = {
+  notificationsWrap: document.getElementById("notificationsWrap"),
+  notificationsBtn: document.getElementById("notificationsBtn"),
+  notificationsBadge: document.getElementById("notificationsBadge"),
+  notificationsMenu: document.getElementById("notificationsMenu"),
+  notificationsList: document.getElementById("notificationsList"),
   toggleAuth: document.getElementById("toggleAuth"),
   accountMenuWrap: document.getElementById("accountMenuWrap"),
   accountMenu: document.getElementById("accountMenu"),
@@ -72,8 +79,8 @@ const el = {
 };
 
 const state = {
-  progress: readJson(progressKey, {}),
-  bookmarks: readJson(bookmarksKey, {}),
+  progress: {},
+  bookmarks: readJson(getBookmarksKey(null), {}),
   supabase: null,
   session: null,
   cloudEnabled: false,
@@ -88,10 +95,21 @@ const state = {
   explorerMode: "genre",
   searchTerm: "",
   searchResults: [],
+  notifications: [],
   autoSyncTimer: null,
   lastSyncAt: 0,
   heroRotationTimer: null
 };
+
+function getBookmarksKey(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  return userId ? `${bookmarksBaseKey}:user:${userId}` : `${bookmarksBaseKey}:guest`;
+}
+
+function getProgressKey(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
+}
 
 let selectedAvatarId = readJson("cinerune:avatar-choice", "orbit");
 let authModalMode = "login";
@@ -102,6 +120,7 @@ boot();
 
 async function boot() {
   bindEvents();
+  syncProgressState();
 
   initTmdb({
     apiKey: String(window.CINERUNE_CONFIG?.tmdbApiKey || "").trim(),
@@ -123,6 +142,12 @@ async function boot() {
 }
 
 function bindEvents() {
+  if (el.notificationsBtn) {
+    el.notificationsBtn.addEventListener("click", () => {
+      toggleNotificationsMenu();
+    });
+  }
+
   if (el.toggleAuth) {
     el.toggleAuth.addEventListener("click", () => {
       if (state.session?.user) {
@@ -192,7 +217,7 @@ function bindEvents() {
 
       try {
         const result = await searchCatalog(state.searchTerm);
-        const merged = [...result.movies, ...result.tv].slice(0, 24);
+        const merged = (result.all || [...result.movies, ...result.tv]).slice(0, 24);
         state.searchResults = merged;
         renderSearchResults(merged);
         renderSearchSuggestions(state.searchResults);
@@ -204,15 +229,18 @@ function bindEvents() {
 
     el.searchInput.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
-      const first = state.searchResults[0];
-      if (!first) return;
-      openWatchPage(first.id, first.mediaType, 1, 1);
+      event.preventDefault();
+      if (!state.searchTerm) return;
+      openSearchPage(state.searchTerm);
     });
   }
 
   document.addEventListener("click", (event) => {
     if (el.accountMenuWrap && !el.accountMenuWrap.contains(event.target)) {
       closeAccountMenu();
+    }
+    if (el.notificationsWrap && !el.notificationsWrap.contains(event.target)) {
+      closeNotificationsMenu();
     }
     if (!el.searchInput || !el.searchSuggestions) return;
     if (event.target === el.searchInput || el.searchSuggestions.contains(event.target)) return;
@@ -230,13 +258,21 @@ function bindEvents() {
   });
 
   window.addEventListener("storage", (event) => {
-    if (event.key !== progressKey || !event.newValue) return;
-    try {
-      state.progress = JSON.parse(event.newValue);
-      hydrateContinueRow();
-      queueAutoSync();
-    } catch {
-      // ignore malformed storage values
+    if (event.key === getProgressKey(state.session) && event.newValue) {
+      try {
+        state.progress = JSON.parse(event.newValue);
+        hydrateContinueRow();
+        refreshPersonalizedCollections();
+        queueAutoSync();
+      } catch {
+        // ignore malformed storage values
+      }
+      return;
+    }
+
+    if (event.key === getBookmarksKey(state.session)) {
+      state.bookmarks = readJson(getBookmarksKey(state.session), {});
+      refreshPersonalizedCollections();
     }
   });
 }
@@ -275,6 +311,7 @@ async function refreshHome() {
   renderTrending();
   renderPopular();
   renderMegaMenu();
+  await refreshNotifications();
   startHeroRotation();
 }
 
@@ -478,15 +515,155 @@ function collectRecommendationHistory() {
   return [...progressEntries, ...bookmarkEntries];
 }
 
-function openWatchPage(id, mediaType, season, episode) {
-  const url = new URL("./watch.html", window.location.href);
-  url.searchParams.set("id", String(id));
-  url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
-  if (mediaType === "tv") {
-    url.searchParams.set("s", String(season || 1));
-    url.searchParams.set("e", String(episode || 1));
+async function refreshPersonalizedCollections() {
+  state.homeData.recommended = await buildRecommendedRow(state.homeData);
+  renderRecommended();
+  await refreshNotifications();
+}
+
+async function refreshNotifications() {
+  if (!state.session?.user) {
+    state.notifications = [];
+    renderNotifications();
+    return;
   }
+
+  const watchingShows = Object.values(state.bookmarks || {})
+    .filter((entry) => entry?.mediaType === "tv" && entry?.status === "watching")
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+    .slice(0, 16);
+
+  const notifications = (await Promise.all(watchingShows.map(buildEpisodeNotification))).filter(Boolean);
+  state.notifications = notifications.sort((a, b) => Number(b.sortAt || 0) - Number(a.sortAt || 0));
+  renderNotifications();
+}
+
+async function buildEpisodeNotification(entry) {
+  const id = Number(entry?.id || 0);
+  if (!id) return null;
+
+  let item = null;
+  try {
+    item = await fetchItemDetailsById(id, "tv");
+  } catch {
+    return null;
+  }
+
+  const latestSeason = Number(item?.latestEpisodeSeason || 0);
+  const latestEpisode = Number(item?.latestEpisodeNumber || 0);
+  const latestAirDate = String(item?.latestEpisodeAirDate || "").trim();
+  if (!latestSeason || !latestEpisode || !latestAirDate || !isReleasedDate(latestAirDate)) {
+    return null;
+  }
+
+  const watched = getLatestWatchedEpisode(id);
+  if (!isEpisodeAfter(latestSeason, latestEpisode, watched.season, watched.episode)) {
+    return null;
+  }
+
+  return {
+    id,
+    mediaType: "tv",
+    title: item?.title || entry.title || `Title ${id}`,
+    poster: item?.poster || entry.poster || "",
+    season: latestSeason,
+    episode: latestEpisode,
+    airDate: latestAirDate,
+    episodeName: item?.latestEpisodeName || "",
+    sortAt: Date.parse(latestAirDate) || Date.now(),
+    message: `${item?.title || entry.title || "This show"} has a new episode available.`,
+    href: buildWatchHref(id, "tv", latestSeason, latestEpisode)
+  };
+}
+
+function getLatestWatchedEpisode(showId) {
+  const entries = Object.values(state.progress || {})
+    .filter((entry) => entry?.mediaType === "tv" && Number(entry.id) === Number(showId))
+    .sort((a, b) => {
+      const seasonDiff = Number(b.season || 1) - Number(a.season || 1);
+      if (seasonDiff !== 0) return seasonDiff;
+      const episodeDiff = Number(b.episode || 1) - Number(a.episode || 1);
+      if (episodeDiff !== 0) return episodeDiff;
+      return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+    });
+
+  if (!entries.length) {
+    return { season: 1, episode: 0 };
+  }
+
+  return {
+    season: Number(entries[0].season || 1),
+    episode: Number(entries[0].episode || 0)
+  };
+}
+
+function renderNotifications() {
+  const signedIn = Boolean(state.session?.user);
+  if (el.notificationsWrap) {
+    el.notificationsWrap.toggleAttribute("hidden", !signedIn);
+  }
+
+  if (!signedIn || !el.notificationsList || !el.notificationsBadge || !el.notificationsBtn) {
+    return;
+  }
+
+  const notifications = state.notifications || [];
+  const count = notifications.length;
+  el.notificationsBadge.textContent = String(count);
+  el.notificationsBadge.toggleAttribute("hidden", count < 1);
+
+  if (!count) {
+    el.notificationsList.innerHTML = '<p class="notification-empty tiny muted">No new episodes right now.</p>';
+    return;
+  }
+
+  el.notificationsList.innerHTML = notifications.map((item) => `
+    <a class="notification-item" href="${escapeHtml(item.href)}" data-id="${item.id}" data-season="${item.season}" data-episode="${item.episode}">
+      <span class="notification-copy">
+        <strong>${escapeHtml(item.title)}</strong>
+        <span>${escapeHtml(`New episode: S${item.season} E${item.episode}${item.episodeName ? ` - ${item.episodeName}` : ""}`)}</span>
+      </span>
+      <span class="notification-date">${escapeHtml(formatShortDate(item.airDate))}</span>
+    </a>
+  `).join("");
+
+  [...el.notificationsList.querySelectorAll(".notification-item")].forEach((node) => {
+    node.addEventListener("click", (event) => {
+      event.preventDefault();
+      closeNotificationsMenu();
+      openWatchPage(Number(node.dataset.id), "tv", Number(node.dataset.season), Number(node.dataset.episode));
+    });
+  });
+}
+
+function toggleNotificationsMenu() {
+  if (!el.notificationsMenu || !state.session?.user) return;
+  const hidden = el.notificationsMenu.hasAttribute("hidden");
+  closeAccountMenu();
+  if (hidden) {
+    el.notificationsMenu.removeAttribute("hidden");
+    el.notificationsBtn?.setAttribute("aria-expanded", "true");
+  } else {
+    closeNotificationsMenu();
+  }
+}
+
+function closeNotificationsMenu() {
+  if (!el.notificationsMenu) return;
+  el.notificationsMenu.setAttribute("hidden", "");
+  el.notificationsBtn?.setAttribute("aria-expanded", "false");
+}
+
+function openSearchPage(term) {
+  const text = String(term || "").trim();
+  if (!text) return;
+  const url = new URL("./search.html", window.location.href);
+  url.searchParams.set("q", text);
   window.location.href = url.toString();
+}
+
+function openWatchPage(id, mediaType, season, episode) {
+  window.location.href = buildWatchHref(id, mediaType, season, episode);
 }
 
 function updateContinueWatchingLink(entry) {
@@ -497,14 +674,37 @@ function updateContinueWatchingLink(entry) {
     return;
   }
 
+  el.continueWatchingLink.href = buildWatchHref(entry.id, entry.mediaType, entry.season || 1, entry.episode || 1);
+}
+
+function buildWatchHref(id, mediaType, season, episode) {
   const url = new URL("./watch.html", window.location.href);
-  url.searchParams.set("id", String(entry.id));
-  url.searchParams.set("type", entry.mediaType === "tv" ? "tv" : "movie");
-  if (entry.mediaType === "tv") {
-    url.searchParams.set("s", String(entry.season || 1));
-    url.searchParams.set("e", String(entry.episode || 1));
+  url.searchParams.set("id", String(id));
+  url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
+  if (mediaType === "tv") {
+    url.searchParams.set("s", String(season || 1));
+    url.searchParams.set("e", String(episode || 1));
   }
-  el.continueWatchingLink.href = url.toString();
+  return url.toString();
+}
+
+function syncBookmarksState() {
+  state.bookmarks = readJson(getBookmarksKey(state.session), {});
+}
+
+function syncProgressState() {
+  const activeKey = getProgressKey(state.session);
+  let progress = readJson(activeKey, null);
+
+  if (!progress && !state.session?.user) {
+    const legacy = readJson(legacyProgressKey, null);
+    if (legacy && typeof legacy === "object") {
+      progress = legacy;
+      localStorage.setItem(activeKey, JSON.stringify(legacy));
+    }
+  }
+
+  state.progress = progress && typeof progress === "object" ? progress : {};
 }
 
 async function initAuth() {
@@ -525,10 +725,14 @@ async function initAuth() {
 
     const { data } = await state.supabase.auth.getSession();
     state.session = data?.session || null;
+    syncProgressState();
+    syncBookmarksState();
     state.cloudEnabled = true;
 
     state.supabase.auth.onAuthStateChange((_event, session) => {
       state.session = session;
+      syncProgressState();
+      syncBookmarksState();
       renderAuthUI();
       if (session?.user) {
         const accountAvatarId = normalizeAvatarId(session.user.user_metadata?.avatarId || selectedAvatarId);
@@ -539,10 +743,14 @@ async function initAuth() {
       if (session?.user) {
         pullCloudProgress();
         queueAutoSync(true);
+      } else {
+        refreshPersonalizedCollections();
+        hydrateContinueRow();
       }
     });
 
     renderAuthUI();
+    renderNotifications();
     if (state.session?.user) {
       await pullCloudProgress();
     }
@@ -601,6 +809,8 @@ function renderAuthUI() {
     el.authIdentifier.value = "";
     el.authPassword.value = "";
   }
+
+  renderNotifications();
 }
 
 async function signIn() {
@@ -839,8 +1049,9 @@ async function pullCloudProgress() {
     };
   });
 
-  localStorage.setItem(progressKey, JSON.stringify(state.progress));
+  localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
   await hydrateContinueRow();
+  await refreshPersonalizedCollections();
   queueAutoSync(true);
 }
 
@@ -925,6 +1136,26 @@ function setStatus(message) {
 
 function setAuthHint(message) {
   el.authHint.textContent = message;
+}
+
+function isReleasedDate(value) {
+  if (!value) return false;
+  const timestamp = Date.parse(`${value}T23:59:59Z`);
+  return Number.isFinite(timestamp) && timestamp <= Date.now();
+}
+
+function isEpisodeAfter(seasonA, episodeA, seasonB, episodeB) {
+  if (Number(seasonA) !== Number(seasonB)) return Number(seasonA) > Number(seasonB);
+  return Number(episodeA) > Number(episodeB);
+}
+
+function formatShortDate(value) {
+  const parsed = Date.parse(String(value || ""));
+  if (!Number.isFinite(parsed)) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric"
+  }).format(new Date(parsed));
 }
 
 function debounce(fn, wait) {

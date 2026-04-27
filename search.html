@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Search | Cinerune</title>
+    <meta name="description" content="Cinerune search results" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="home-body">
+    <div class="home-atmosphere" aria-hidden="true"></div>
+
+    <header class="home-topbar">
+      <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
+      <nav class="home-nav" aria-label="Search navigation">
+        <a href="./index.html">Home</a>
+      </nav>
+      <a class="pill-btn" href="./index.html">Back</a>
+    </header>
+
+    <main class="home-shell">
+      <section class="home-row">
+        <div class="row-head">
+          <h2 id="searchPageTitle">Search</h2>
+        </div>
+        <div class="search-wrap search-wrap-wide">
+          <input id="searchPageInput" class="search-input" type="search" placeholder="Search movies or shows..." autocomplete="off" />
+        </div>
+        <p id="searchPageStatus" class="tiny muted">Search for a movie or show.</p>
+      </section>
+
+      <section class="home-row">
+        <div class="row-head compact">
+          <h3>Results</h3>
+        </div>
+        <div id="searchPageGrid" class="poster-grid"></div>
+      </section>
+    </main>
+
+    <template id="posterCardTemplate">
+      <article class="poster-card">
+        <button class="poster-btn" type="button">
+          <img class="poster-img" alt="" loading="lazy" decoding="async" />
+          <span class="badge-hd">HD</span>
+          <div class="poster-meta">
+            <h4 class="poster-title"></h4>
+            <p class="poster-sub"></p>
+          </div>
+        </button>
+      </article>
+    </template>
+
+    <script src="config.js"></script>
+    <script>
+      (function () {
+        const isLocalHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(location.hostname) || location.hostname.endsWith(".local");
+        if (!isLocalHost) {
+          return;
+        }
+        const script = document.createElement("script");
+        script.src = "config.local.js";
+        script.async = false;
+        document.head.appendChild(script);
+      })();
+    </script>
+    <script type="module" src="search.js?v=20260427e"></script>
+  </body>
+</html>

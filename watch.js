@@ -11,13 +11,19 @@ import {
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const settingsKey = "cinerune:settings";
-const progressKey = "cinerune:progress";
+const legacyProgressKey = "cinerune:progress";
+const progressBaseKey = "cinerune:progress";
 const bookmarksBaseKey = "cinerune:bookmarks";
 const reportsKey = "cinerune:reports";
 
 function getBookmarksKey(session) {
   const userId = session?.user?.id ? String(session.user.id) : "";
   return userId ? `${bookmarksBaseKey}:user:${userId}` : `${bookmarksBaseKey}:guest`;
+}
+
+function getProgressKey(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
 }
 
 const el = {
@@ -74,7 +80,7 @@ const state = {
     nextEpisode: true,
     autoNextSmart: true
   }),
-  progress: readJson(progressKey, {}),
+  progress: {},
   bookmarks: readJson(getBookmarksKey(null), {}),
   reports: readJson(reportsKey, []),
   supabase: null,
@@ -87,6 +93,7 @@ const state = {
 boot();
 
 async function boot() {
+  syncProgressState();
   initTmdb({
     apiKey: String(window.CINERUNE_CONFIG?.tmdbApiKey || "").trim(),
     readAccessToken: String(window.CINERUNE_CONFIG?.tmdbReadAccessToken || "").trim(),
@@ -484,6 +491,21 @@ function getSavedProgress() {
   return state.progress[key] || null;
 }
 
+function syncProgressState() {
+  const activeKey = getProgressKey(state.session);
+  let progress = readJson(activeKey, null);
+
+  if (!progress && !state.session?.user) {
+    const legacy = readJson(legacyProgressKey, null);
+    if (legacy && typeof legacy === "object") {
+      progress = legacy;
+      localStorage.setItem(activeKey, JSON.stringify(legacy));
+    }
+  }
+
+  state.progress = progress && typeof progress === "object" ? progress : {};
+}
+
 function syncBookmarkButton() {
   if (!el.bookmarkTrigger || !el.bookmarkMenu || !state.item) return;
 
@@ -547,7 +569,7 @@ function onPlayerMessage(event) {
     state.progress[key].progress = 100;
   }
 
-  localStorage.setItem(progressKey, JSON.stringify(state.progress));
+  localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
   queueAutoSync(data.event === "ended");
 
   if (data.event === "ended" && mediaType === "tv" && state.settings.autoNextSmart) {
@@ -569,11 +591,13 @@ async function initAuth() {
 
     const { data } = await state.supabase.auth.getSession();
     state.session = data?.session || null;
+    syncProgressState();
     if (state.session?.user) queueAutoSync(true);
     renderWatchAccountUI();
 
     state.supabase.auth.onAuthStateChange((_event, session) => {
       state.session = session;
+      syncProgressState();
       state.bookmarks = readJson(getBookmarksKey(session), {});
       syncBookmarkButton();
       renderWatchAccountUI();
