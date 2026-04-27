@@ -544,6 +544,50 @@ body {
   gap: 0.45rem;
 }
 
+.account-menu-wrap {
+  position: relative;
+}
+
+.account-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 220px;
+  padding: 0.45rem;
+  border: 1px solid rgba(145, 178, 205, 0.18);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(16, 30, 49, 0.98), rgba(12, 25, 42, 0.98));
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 0.25rem;
+  z-index: 60;
+}
+
+.account-menu-item {
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #e4eefb;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.62rem 0.7rem;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.account-menu-item:hover {
+  background: rgba(126, 216, 255, 0.12);
+}
+
+.account-menu-item.destructive {
+  color: #ffdcdc;
+}
+
+.account-menu-item.destructive:hover {
+  background: rgba(214, 90, 90, 0.16);
+}
+
 .nav-avatar,
 .account-avatar {
   width: 28px;
@@ -740,6 +784,11 @@ body {
 
 .bookmark-trigger-wrap {
   position: relative;
+}
+
+.dropdown[hidden],
+.account-menu[hidden] {
+  display: none !important;
 }
 
 .server-row {

@@ -23,10 +23,18 @@
       </nav>
 
       <a class="pill-btn ghost" href="./lists.html">My Lists</a>
-      <button id="toggleAuth" class="pill-btn account-pill" type="button">
-        <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" />
-        <span id="authButtonLabel">Account</span>
-      </button>
+      <div id="accountMenuWrap" class="account-menu-wrap">
+        <button id="toggleAuth" class="pill-btn account-pill" type="button">
+          <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" />
+          <span id="authButtonLabel">Login</span>
+        </button>
+        <div id="accountMenu" class="account-menu" hidden>
+          <button id="openAccountSettings" class="account-menu-item" type="button">Settings</button>
+          <a class="account-menu-item" href="./lists.html">My Lists</a>
+          <a class="account-menu-item" href="./watch.html">Continue Watching</a>
+          <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">Sign Out</button>
+        </div>
+      </div>
     </header>
 
     <section id="megaMenuPanel" class="mega-menu" hidden>
@@ -52,12 +60,6 @@
             <span>Password</span>
             <input id="authPassword" type="password" placeholder="your password" />
           </label>
-          <div class="avatar-picker-block">
-            <div class="row-head compact">
-              <h3>Pick an Avatar</h3>
-            </div>
-            <div id="avatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
-          </div>
           <div class="account-actions">
             <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
             <button id="signUpBtn" class="pill-btn ghost" type="button">Create Account</button>

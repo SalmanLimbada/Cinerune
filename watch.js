@@ -93,6 +93,9 @@ async function boot() {
   });
 
   bindEvents();
+  if (el.bookmarkMenu) {
+    el.bookmarkMenu.setAttribute("hidden", "");
+  }
   hydrateSettingsUI();
   await initAuth();
 

@@ -24,6 +24,10 @@ const avatarOptions = [
 
 const el = {
   toggleAuth: document.getElementById("toggleAuth"),
+  accountMenuWrap: document.getElementById("accountMenuWrap"),
+  accountMenu: document.getElementById("accountMenu"),
+  openAccountSettings: document.getElementById("openAccountSettings"),
+  signOutMenuBtn: document.getElementById("signOutMenuBtn"),
   authModal: document.getElementById("authModal"),
   authBackdrop: document.getElementById("authBackdrop"),
   closeAuth: document.getElementById("closeAuth"),
@@ -107,7 +111,11 @@ async function boot() {
 function bindEvents() {
   if (el.toggleAuth) {
     el.toggleAuth.addEventListener("click", () => {
-      openAuthModal();
+      if (state.session?.user) {
+        toggleAccountMenu();
+      } else {
+        openAuthModal();
+      }
     });
   }
 
@@ -125,6 +133,14 @@ function bindEvents() {
   if (el.signInBtn) el.signInBtn.addEventListener("click", signIn);
   if (el.signUpBtn) el.signUpBtn.addEventListener("click", signUp);
   if (el.signOutBtn) el.signOutBtn.addEventListener("click", signOut);
+  if (el.signOutMenuBtn) el.signOutMenuBtn.addEventListener("click", signOut);
+
+  if (el.openAccountSettings) {
+    el.openAccountSettings.addEventListener("click", () => {
+      closeAccountMenu();
+      openAuthModal(true);
+    });
+  }
 
   if (el.authIdentifier) {
     el.authIdentifier.addEventListener("keydown", onAuthEnter);
@@ -181,6 +197,9 @@ function bindEvents() {
   }
 
   document.addEventListener("click", (event) => {
+    if (el.accountMenuWrap && !el.accountMenuWrap.contains(event.target)) {
+      closeAccountMenu();
+    }
     if (!el.searchInput || !el.searchSuggestions) return;
     if (event.target === el.searchInput || el.searchSuggestions.contains(event.target)) return;
     hideSearchSuggestions();
@@ -473,12 +492,15 @@ function renderAuthUI() {
     renderAvatarPickers();
     renderActiveAvatar(avatarId);
     renderAccountButton(avatarId, "Account");
+    if (el.toggleAuth) el.toggleAuth.title = "Open account menu";
     setAuthHint("Welcome back.");
     el.signedInHint.textContent = "You are signed in.";
   } else {
     const avatarId = normalizeAvatarId(selectedAvatarId);
     renderActiveAvatar(avatarId);
     renderAccountButton(avatarId, "Login");
+    closeAccountMenu();
+    if (el.toggleAuth) el.toggleAuth.title = "Sign in";
     setAuthHint("Sign in to save your lists.");
   }
 }
@@ -624,6 +646,28 @@ async function persistAvatarChoice(avatarId) {
   } catch {
     // ignore avatar sync errors
   }
+}
+
+function toggleAccountMenu(forceOpen) {
+  if (!el.accountMenu) return;
+  const shouldOpen = typeof forceOpen === "boolean" ? forceOpen : el.accountMenu.hasAttribute("hidden");
+  if (shouldOpen) {
+    el.accountMenu.removeAttribute("hidden");
+    el.toggleAuth?.classList.add("active");
+  } else {
+    closeAccountMenu();
+  }
+}
+
+function closeAccountMenu() {
+  if (!el.accountMenu) return;
+  el.accountMenu.setAttribute("hidden", "");
+  el.toggleAuth?.classList.remove("active");
+}
+
+function openAuthModal(_settingsMode = false) {
+  if (!el.authModal) return;
+  el.authModal.removeAttribute("hidden");
 }
 
 async function syncProgressToCloud() {
@@ -881,11 +925,6 @@ function dedupeById(items) {
     map.set(`${item.mediaType}:${item.id}`, item);
   });
   return [...map.values()];
-}
-
-function openAuthModal() {
-  if (!el.authModal) return;
-  el.authModal.removeAttribute("hidden");
 }
 
 function closeAuthModal() {
