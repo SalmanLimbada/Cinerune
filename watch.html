@@ -124,7 +124,16 @@
     <button id="saveSettingsBtn" type="button" hidden>Save</button>
 
     <script src="config.js"></script>
-    <script src="config.local.js"></script>
+    <script>
+      (function () {
+        const script = document.createElement("script");
+        script.src = "config.local.js";
+        script.async = false;
+        script.onload = () => {};
+        script.onerror = () => {};
+        document.head.appendChild(script);
+      })();
+    </script>
     <script type="module" src="watch.js"></script>
   </body>
 </html>
