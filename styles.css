@@ -267,6 +267,7 @@ body {
 }
 
 .poster-card {
+  position: relative;
   width: 130px;
   min-width: 130px;
 }
@@ -293,6 +294,41 @@ body {
 
 .poster-meta {
   padding-top: 0.22rem;
+}
+
+.continue-remove-btn {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 1.45rem;
+  height: 1.45rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(7, 17, 30, 0.86);
+  color: #ffffff;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity 140ms ease, transform 140ms ease, background 140ms ease;
+  z-index: 3;
+}
+
+.poster-card:hover .continue-remove-btn,
+.poster-card:focus-within .continue-remove-btn {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.continue-remove-btn:hover {
+  background: rgba(189, 42, 60, 0.96);
 }
 
 .poster-title {

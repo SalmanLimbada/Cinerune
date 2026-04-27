@@ -423,9 +423,8 @@ function renderMegaMenu() {
 }
 
 async function hydrateContinueRow() {
-  const entries = Object.values(state.progress)
-    .filter((entry) => Number(entry.timestamp || 0) > 20 && Number(entry.progress || 0) < 98)
-    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+  const entries = dedupeContinueEntries(Object.values(state.progress)
+    .filter((entry) => Number(entry.timestamp || 0) > 20 && Number(entry.progress || 0) < 98))
     .slice(0, 14);
 
   updateContinueWatchingLink(entries[0] || null);
@@ -448,6 +447,7 @@ async function hydrateContinueRow() {
       title: apiItem?.title || entry.title || titleById(entry.id, entry.mediaType) || `Title ${entry.id}`,
       poster: apiItem?.poster || entry.poster || posterById(entry.id, entry.mediaType) || "",
       year: apiItem?.year || "",
+      progressKey: `${entry.mediaType}:${entry.id}:${entry.season || 1}:${entry.episode || 1}`,
       progressMeta: entry.mediaType === "tv"
         ? `S${entry.season || 1} E${entry.episode || 1} • ${formatSeconds(entry.timestamp)}`
         : `${Math.round(Number(entry.progress || 0))}% • ${formatSeconds(entry.timestamp)}`
@@ -455,7 +455,7 @@ async function hydrateContinueRow() {
   });
 
   el.continueSection.removeAttribute("hidden");
-  renderPosterCards(el.continueGrid, items, { showProgressMeta: true, rowMode: true });
+  renderPosterCards(el.continueGrid, items, { showProgressMeta: true, rowMode: true, allowContinueRemove: true });
 }
 
 function renderPosterCards(container, items, options = {}) {
@@ -482,6 +482,20 @@ function renderPosterCards(container, items, options = {}) {
       sub.textContent = [typeLabel, item.year].filter(Boolean).join(" | ");
     }
 
+    if (options.allowContinueRemove && item.progressKey) {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "continue-remove-btn";
+      removeBtn.setAttribute("aria-label", `Remove ${item.title} from Continue Watching`);
+      removeBtn.textContent = "×";
+      removeBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        removeContinueEntry(item.progressKey);
+      });
+      node.appendChild(removeBtn);
+    }
+
     button.addEventListener("click", () => {
       openWatchPage(item.id, item.mediaType, item.defaultSeason || 1, item.defaultEpisode || 1);
     });
@@ -490,6 +504,26 @@ function renderPosterCards(container, items, options = {}) {
   });
 
   container.appendChild(fragment);
+}
+
+function dedupeContinueEntries(entries) {
+  const map = new Map();
+  entries.forEach((entry) => {
+    const key = `${entry.mediaType === "tv" ? "tv" : "movie"}:${Number(entry.id || 0)}`;
+    const previous = map.get(key);
+    if (!previous || Number(entry.updatedAt || 0) > Number(previous.updatedAt || 0)) {
+      map.set(key, entry);
+    }
+  });
+  return [...map.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+}
+
+function removeContinueEntry(progressEntryKey) {
+  if (!progressEntryKey || !state.progress?.[progressEntryKey]) return;
+  delete state.progress[progressEntryKey];
+  localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
+  void hydrateContinueRow();
+  void refreshPersonalizedCollections();
 }
 
 async function buildRecommendedRow(homeData) {
