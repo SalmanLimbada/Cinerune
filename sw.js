@@ -1,4 +1,4 @@
-const STATIC_CACHE = "cinerune-static-v14";
+const STATIC_CACHE = "cinerune-static-v15";
 const ASSETS = ["./", "./index.html", "./watch.html", "./lists.html", "./browse.html", "./styles.css", "./app.js", "./watch.js", "./lists.js", "./browse.js", "./catalog.js", "./config.js", "./favicon.svg"];
 
 self.addEventListener("install", (event) => {

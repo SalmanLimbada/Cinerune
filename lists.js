@@ -4,6 +4,7 @@ import {
   titleById,
   posterById
 } from "./catalog.js?v=20260423b";
+} from "./catalog.js?v=20260427c";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 const bookmarksBaseKey = "cinerune:bookmarks";

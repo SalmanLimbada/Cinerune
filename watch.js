@@ -8,6 +8,7 @@ import {
   titleById,
   posterById
 } from "./catalog.js?v=20260423b";
+} from "./catalog.js?v=20260427c";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const settingsKey = "cinerune:settings";

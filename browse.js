@@ -2,7 +2,7 @@ import {
   initTmdb,
   fetchTitlesByGenre,
   fetchTitlesByCountry
-} from "./catalog.js?v=20260423b";
+} from "./catalog.js?v=20260427c";
 
 const query = new URLSearchParams(window.location.search);
 const mode = query.get("mode") === "country" ? "country" : "genre";

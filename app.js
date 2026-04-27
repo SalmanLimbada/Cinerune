@@ -1,5 +1,5 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-import * as catalogApi from "./catalog.js?v=20260423b";
+import * as catalogApi from "./catalog.js?v=20260427c";
 
 const initTmdb = catalogApi.initTmdb;
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
@@ -509,22 +509,22 @@ function renderAuthUI() {
     renderActiveAvatar(avatarId);
     renderAccountButton(avatarId, "Account");
     if (el.toggleAuth) el.toggleAuth.title = "Open account menu";
+    const authTitle = el.authModal?.querySelector("#authTitle");
     if (settingsMode) {
       const signedInProfile = el.signedInView.querySelector(".signed-in-profile");
       const signedInHint = el.signedInView.querySelector("#signedInHint");
       if (signedInProfile) signedInProfile.setAttribute("hidden", "");
       if (signedInHint) signedInHint.setAttribute("hidden", "");
-      const authTitle = el.authModal?.querySelector("#authTitle");
       if (authTitle) authTitle.textContent = "Settings";
+      setAuthHint("");
     } else {
       const signedInProfile = el.signedInView.querySelector(".signed-in-profile");
       const signedInHint = el.signedInView.querySelector("#signedInHint");
       if (signedInProfile) signedInProfile.removeAttribute("hidden");
       if (signedInHint) signedInHint.removeAttribute("hidden");
-      const authTitle = el.authModal?.querySelector("#authTitle");
       if (authTitle) authTitle.textContent = "Welcome Back";
+      setAuthHint("Welcome back.");
     }
-    setAuthHint("Welcome back.");
     el.signedInHint.textContent = "You are signed in.";
   } else {
     const avatarId = normalizeAvatarId(selectedAvatarId);
