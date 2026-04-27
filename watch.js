@@ -12,8 +12,13 @@ import {
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const settingsKey = "cinerune:settings";
 const progressKey = "cinerune:progress";
-const bookmarksKey = "cinerune:bookmarks";
+const bookmarksBaseKey = "cinerune:bookmarks";
 const reportsKey = "cinerune:reports";
+
+function getBookmarksKey(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  return userId ? `${bookmarksBaseKey}:user:${userId}` : `${bookmarksBaseKey}:guest`;
+}
 
 const el = {
   watchTagline: document.getElementById("watchTagline"),
@@ -67,7 +72,7 @@ const state = {
     autoNextSmart: true
   }),
   progress: readJson(progressKey, {}),
-  bookmarks: readJson(bookmarksKey, {}),
+  bookmarks: readJson(getBookmarksKey(null), {}),
   reports: readJson(reportsKey, []),
   supabase: null,
   session: null,
@@ -131,8 +136,15 @@ function bindEvents() {
 
   el.bookmarkTrigger.addEventListener("click", () => {
     const hidden = el.bookmarkMenu.hasAttribute("hidden");
-    if (hidden) el.bookmarkMenu.removeAttribute("hidden");
-    else el.bookmarkMenu.setAttribute("hidden", "");
+    if (hidden) {
+      el.bookmarkMenu.removeAttribute("hidden");
+      el.bookmarkTrigger.classList.add("active");
+      el.bookmarkTrigger.setAttribute("aria-expanded", "true");
+    } else {
+      el.bookmarkMenu.setAttribute("hidden", "");
+      el.bookmarkTrigger.classList.remove("active");
+      el.bookmarkTrigger.setAttribute("aria-expanded", "false");
+    }
   });
 
   [...document.querySelectorAll(".bookmark-option")].forEach((node) => {
@@ -145,6 +157,8 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     if (!el.bookmarkMenu.contains(event.target) && !el.bookmarkTrigger.contains(event.target)) {
       el.bookmarkMenu.setAttribute("hidden", "");
+      el.bookmarkTrigger.classList.remove("active");
+      el.bookmarkTrigger.setAttribute("aria-expanded", "false");
     }
   });
 
@@ -207,6 +221,8 @@ function hydrateInfo() {
   el.sideProgress.textContent = resume?.timestamp
     ? `Resume: ${formatSeconds(resume.timestamp)} (${Math.round(Number(resume.progress || 0))}%)`
     : "No saved progress yet.";
+
+  syncBookmarkButton();
 }
 
 async function hydrateEpisodeControls() {
@@ -388,7 +404,8 @@ function saveBookmark(status) {
     updatedAt: Date.now()
   };
 
-  localStorage.setItem(bookmarksKey, JSON.stringify(state.bookmarks));
+  localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+  syncBookmarkButton();
   setStatus(`Saved to ${labelForStatus(normalizedStatus)}.`);
 }
 
@@ -416,6 +433,19 @@ function submitReport() {
 function getSavedProgress() {
   const key = `${state.mediaType}:${state.id}:${state.season}:${state.episode}`;
   return state.progress[key] || null;
+}
+
+function syncBookmarkButton() {
+  if (!el.bookmarkTrigger || !el.bookmarkMenu || !state.item) return;
+
+  const current = state.bookmarks[`${state.mediaType}:${state.id}`] || null;
+  el.bookmarkTrigger.textContent = current?.status ? labelForStatus(current.status) : "Bookmark";
+  el.bookmarkTrigger.classList.toggle("active", Boolean(current) && !el.bookmarkMenu.hasAttribute("hidden"));
+  el.bookmarkTrigger.setAttribute("aria-expanded", el.bookmarkMenu.hasAttribute("hidden") ? "false" : "true");
+
+  [...el.bookmarkMenu.querySelectorAll(".bookmark-option")].forEach((node) => {
+    node.classList.toggle("active", node.dataset.status === current?.status);
+  });
 }
 
 function onPlayerMessage(event) {
@@ -484,6 +514,8 @@ async function initAuth() {
 
     state.supabase.auth.onAuthStateChange((_event, session) => {
       state.session = session;
+      state.bookmarks = readJson(getBookmarksKey(session), {});
+      syncBookmarkButton();
       if (session?.user) queueAutoSync(true);
     });
   } catch {

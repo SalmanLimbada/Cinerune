@@ -4,8 +4,14 @@ import {
   titleById,
   posterById
 } from "./catalog.js?v=20260423b";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-const bookmarksKey = "cinerune:bookmarks";
+const bookmarksBaseKey = "cinerune:bookmarks";
+
+function getBookmarksKey(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  return userId ? `${bookmarksBaseKey}:user:${userId}` : `${bookmarksBaseKey}:guest`;
+}
 
 const el = {
   listsStatus: document.getElementById("listsStatus"),
@@ -14,6 +20,11 @@ const el = {
   listPlan: document.getElementById("listPlan"),
   listDropped: document.getElementById("listDropped"),
   posterCardTemplate: document.getElementById("posterCardTemplate")
+};
+
+const state = {
+  supabase: null,
+  session: null
 };
 
 boot();
@@ -25,7 +36,9 @@ async function boot() {
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 
-  const bookmarks = Object.values(readJson(bookmarksKey, {}))
+  await initAuth();
+
+  const bookmarks = Object.values(readJson(getBookmarksKey(state.session), {}))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
   if (!bookmarks.length) {
@@ -45,6 +58,26 @@ async function boot() {
   renderList(el.listDropped, hydrated.filter((item) => item.status === "dropped"));
 
   el.listsStatus.textContent = `${hydrated.length} saved title${hydrated.length === 1 ? "" : "s"}.`;
+}
+
+async function initAuth() {
+  const config = window.CINERUNE_CONFIG || {};
+  const supabaseUrl = String(config.supabaseUrl || "").trim();
+  const supabasePublishableKey = String(config.supabasePublishableKey || config.supabaseAnonKey || "").trim();
+
+  if (!supabaseUrl || !supabasePublishableKey) return;
+
+  try {
+    state.supabase = createClient(supabaseUrl, supabasePublishableKey, {
+      auth: { persistSession: true, autoRefreshToken: true }
+    });
+
+    const { data } = await state.supabase.auth.getSession();
+    state.session = data?.session || null;
+  } catch {
+    state.supabase = null;
+    state.session = null;
+  }
 }
 
 async function hydrateBookmarks(bookmarks) {

@@ -624,6 +624,13 @@ body {
   cursor: pointer;
 }
 
+.control-btn.active {
+  background: linear-gradient(120deg, #71d4ff, #b8ecff);
+  border-color: rgba(148, 225, 255, 0.6);
+  color: #07172a;
+  box-shadow: 0 0 0 1px rgba(113, 212, 255, 0.22), 0 6px 16px rgba(49, 131, 182, 0.28);
+}
+
 .server-row {
   display: flex;
   justify-content: center;
@@ -727,26 +734,47 @@ body {
   right: 0;
   top: calc(100% + 4px);
   display: grid;
-  width: 160px;
+  width: 208px;
   border: 1px solid rgba(146, 179, 205, 0.24);
-  border-radius: 8px;
-  background: rgba(8, 23, 39, 0.98);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(10, 26, 44, 0.99), rgba(6, 20, 34, 0.99));
   z-index: 40;
+  overflow: hidden;
 }
 
 .bookmark-option {
+  position: relative;
   border: 0;
   background: transparent;
   color: #dceaf9;
   text-align: left;
   font: inherit;
-  font-size: 0.76rem;
-  padding: 0.45rem 0.55rem;
+  font-size: 0.82rem;
+  padding: 0.66rem 0.75rem 0.66rem 0.95rem;
   cursor: pointer;
 }
 
 .bookmark-option:hover {
   background: rgba(34, 65, 97, 0.7);
+}
+
+.bookmark-option::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: transparent;
+}
+
+.bookmark-option.active {
+  background: rgba(113, 212, 255, 0.16);
+  color: #ffffff;
+}
+
+.bookmark-option.active::before {
+  background: linear-gradient(180deg, #7ed8ff, #35aee0);
 }
 
 .arrow-btn {
