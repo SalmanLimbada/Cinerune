@@ -23,7 +23,10 @@
       </nav>
 
       <a class="pill-btn ghost" href="./lists.html">My Lists</a>
-      <button id="toggleAuth" class="pill-btn" type="button">Account</button>
+      <button id="toggleAuth" class="pill-btn account-pill" type="button">
+        <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" />
+        <span id="authButtonLabel">Account</span>
+      </button>
     </header>
 
     <section id="megaMenuPanel" class="mega-menu" hidden>
@@ -49,6 +52,12 @@
             <span>Password</span>
             <input id="authPassword" type="password" placeholder="your password" />
           </label>
+          <div class="avatar-picker-block">
+            <div class="row-head compact">
+              <h3>Pick an Avatar</h3>
+            </div>
+            <div id="avatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
+          </div>
           <div class="account-actions">
             <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
             <button id="signUpBtn" class="pill-btn ghost" type="button">Create Account</button>
@@ -58,11 +67,22 @@
 
         <div id="signedInView" hidden>
           <h2>Account</h2>
-          <p class="tiny">Signed in as <strong id="authUserEmail">-</strong></p>
+          <div class="signed-in-profile">
+            <img id="accountAvatar" class="account-avatar" alt="Selected avatar" />
+            <div>
+              <p class="tiny">Signed in as <strong id="authUserEmail">-</strong></p>
+              <p id="signedInHint" class="tiny muted">You are signed in.</p>
+            </div>
+          </div>
           <div class="account-actions">
             <button id="signOutBtn" class="pill-btn ghost" type="button">Sign Out</button>
           </div>
-          <p id="signedInHint" class="tiny muted">You are signed in.</p>
+          <div class="avatar-picker-block compact">
+            <div class="row-head compact">
+              <h3>Change Avatar</h3>
+            </div>
+            <div id="signedInAvatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
+          </div>
         </div>
       </div>
     </section>

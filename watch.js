@@ -50,6 +50,7 @@ const el = {
   relatedPrevBtn: document.getElementById("relatedPrevBtn"),
   relatedNextBtn: document.getElementById("relatedNextBtn"),
   bookmarkTrigger: document.getElementById("bookmarkTrigger"),
+  bookmarkCurrent: document.getElementById("bookmarkCurrent"),
   bookmarkMenu: document.getElementById("bookmarkMenu"),
   reportTrigger: document.getElementById("reportTrigger"),
   reportDialog: document.getElementById("reportDialog"),
@@ -439,8 +440,11 @@ function syncBookmarkButton() {
   if (!el.bookmarkTrigger || !el.bookmarkMenu || !state.item) return;
 
   const current = state.bookmarks[`${state.mediaType}:${state.id}`] || null;
-  el.bookmarkTrigger.textContent = current?.status ? labelForStatus(current.status) : "Bookmark";
-  el.bookmarkTrigger.classList.toggle("active", Boolean(current) && !el.bookmarkMenu.hasAttribute("hidden"));
+  if (el.bookmarkCurrent) {
+    el.bookmarkCurrent.textContent = current?.status ? `Saved as ${labelForStatus(current.status)}` : "Not saved";
+  }
+  el.bookmarkTrigger.textContent = "Bookmark";
+  el.bookmarkTrigger.classList.toggle("active", Boolean(current) || !el.bookmarkMenu.hasAttribute("hidden"));
   el.bookmarkTrigger.setAttribute("aria-expanded", el.bookmarkMenu.hasAttribute("hidden") ? "false" : "true");
 
   [...el.bookmarkMenu.querySelectorAll(".bookmark-option")].forEach((node) => {

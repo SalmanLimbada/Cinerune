@@ -21,7 +21,10 @@
         <a href="./index.html#recommendedSection">TV-Series</a>
         <a href="./index.html#latestMoviesSection">Updates</a>
       </nav>
-      <a class="pill-btn ghost" href="./index.html">Home</a>
+      <div class="watch-top-actions">
+        <a class="pill-btn ghost" href="./lists.html">My Lists</a>
+        <a class="pill-btn ghost" href="./index.html">Home</a>
+      </div>
     </header>
 
     <main class="watch-shell">
@@ -48,6 +51,7 @@
           <div class="right-controls">
             <div class="dropdown" id="bookmarkDropdown">
               <button id="bookmarkTrigger" class="control-btn" type="button">Bookmark</button>
+              <span id="bookmarkCurrent" class="bookmark-current">Not saved</span>
               <div id="bookmarkMenu" class="dropdown-menu" hidden>
                 <button class="bookmark-option" data-status="watching" type="button">Watching</button>
                 <button class="bookmark-option" data-status="watched" type="button">Watched</button>

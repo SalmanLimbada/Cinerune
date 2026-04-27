@@ -13,6 +13,14 @@ const fetchItemsByIds = catalogApi.fetchItemsByIds;
 const progressKey = "cinerune:progress";
 const bookmarksKey = "cinerune:bookmarks";
 const homeCacheKey = "cinerune:home-cache";
+const avatarOptions = [
+  { id: "orbit", label: "Orbit", color: "#7ad8ff" },
+  { id: "ember", label: "Ember", color: "#ff8f6b" },
+  { id: "mint", label: "Mint", color: "#7ef0c4" },
+  { id: "sun", label: "Sun", color: "#ffd86a" },
+  { id: "violet", label: "Violet", color: "#c8a7ff" },
+  { id: "rose", label: "Rose", color: "#ff8dc7" }
+];
 
 const el = {
   toggleAuth: document.getElementById("toggleAuth"),
@@ -29,6 +37,11 @@ const el = {
   signOutBtn: document.getElementById("signOutBtn"),
   authHint: document.getElementById("authHint"),
   authUserEmail: document.getElementById("authUserEmail"),
+  authAvatarThumb: document.getElementById("authAvatarThumb"),
+  authButtonLabel: document.getElementById("authButtonLabel"),
+  accountAvatar: document.getElementById("accountAvatar"),
+  avatarPicker: document.getElementById("avatarPicker"),
+  signedInAvatarPicker: document.getElementById("signedInAvatarPicker"),
   heroSection: document.getElementById("heroSection"),
   heroType: document.getElementById("heroType"),
   heroTitle: document.getElementById("heroTitle"),
@@ -72,6 +85,8 @@ const state = {
   heroRotationTimer: null
 };
 
+let selectedAvatarId = readJson("cinerune:avatar-choice", "orbit");
+
 boot();
 
 async function boot() {
@@ -110,6 +125,15 @@ function bindEvents() {
   if (el.signInBtn) el.signInBtn.addEventListener("click", signIn);
   if (el.signUpBtn) el.signUpBtn.addEventListener("click", signUp);
   if (el.signOutBtn) el.signOutBtn.addEventListener("click", signOut);
+
+  if (el.authIdentifier) {
+    el.authIdentifier.addEventListener("keydown", onAuthEnter);
+  }
+  if (el.authPassword) {
+    el.authPassword.addEventListener("keydown", onAuthEnter);
+  }
+
+  renderAvatarPickers();
 
   if (el.showGenreExplorer) {
     el.showGenreExplorer.addEventListener("click", () => {
@@ -416,6 +440,12 @@ async function initAuth() {
       state.session = session;
       renderAuthUI();
       if (session?.user) {
+        const accountAvatarId = normalizeAvatarId(session.user.user_metadata?.avatarId || selectedAvatarId);
+        if (session.user.user_metadata?.avatarId !== accountAvatarId) {
+          persistAvatarChoice(accountAvatarId);
+        }
+      }
+      if (session?.user) {
         pullCloudProgress();
         queueAutoSync(true);
       }
@@ -434,14 +464,21 @@ function renderAuthUI() {
   const signedIn = Boolean(state.session?.user);
   el.signedOutView.toggleAttribute("hidden", signedIn);
   el.signedInView.toggleAttribute("hidden", !signedIn);
-  el.toggleAuth.textContent = signedIn ? "Account" : "Login";
 
   if (signedIn) {
     const user = state.session.user;
     el.authUserEmail.textContent = user.user_metadata?.username || user.email || user.id;
+    const avatarId = normalizeAvatarId(user.user_metadata?.avatarId || selectedAvatarId);
+    selectedAvatarId = avatarId;
+    renderAvatarPickers();
+    renderActiveAvatar(avatarId);
+    renderAccountButton(avatarId, "Account");
     setAuthHint("Welcome back.");
     el.signedInHint.textContent = "You are signed in.";
   } else {
+    const avatarId = normalizeAvatarId(selectedAvatarId);
+    renderActiveAvatar(avatarId);
+    renderAccountButton(avatarId, "Login");
     setAuthHint("Sign in to save your lists.");
   }
 }
@@ -463,6 +500,7 @@ async function signIn() {
     return;
   }
 
+  await persistAvatarChoice(selectedAvatarId);
   setAuthHint("Signed in.");
   closeAuthModal();
 }
@@ -483,7 +521,7 @@ async function signUp() {
   const payload = {
     email,
     password,
-    options: isEmail ? {} : { data: { username: identifier } }
+    options: isEmail ? { data: { avatarId: normalizeAvatarId(selectedAvatarId) } } : { data: { username: identifier, avatarId: normalizeAvatarId(selectedAvatarId) } }
   };
 
   const { error } = await state.supabase.auth.signUp(payload);
@@ -499,6 +537,93 @@ async function signOut() {
   if (!state.supabase) return;
   await state.supabase.auth.signOut();
   setAuthHint("Signed out.");
+}
+
+function onAuthEnter(event) {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  signIn();
+}
+
+function normalizeAvatarId(value) {
+  const fallback = avatarOptions[0]?.id || "orbit";
+  return avatarOptions.some((option) => option.id === value) ? value : fallback;
+}
+
+function renderAvatarPickers() {
+  const containers = [el.avatarPicker, el.signedInAvatarPicker].filter(Boolean);
+  if (!containers.length) return;
+
+  const activeId = normalizeAvatarId(selectedAvatarId);
+  containers.forEach((container) => {
+    container.innerHTML = avatarOptions.map((avatar) => `
+      <button class="avatar-option${avatar.id === activeId ? " active" : ""}" type="button" data-avatar="${avatar.id}" aria-label="Select ${avatar.label} avatar">
+        <span class="avatar-swatch" style="--avatar-color:${avatar.color}"></span>
+        <span>${avatar.label}</span>
+      </button>
+    `).join("");
+
+    [...container.querySelectorAll(".avatar-option")].forEach((node) => {
+      node.addEventListener("click", async () => {
+        selectedAvatarId = normalizeAvatarId(node.dataset.avatar);
+        localStorage.setItem("cinerune:avatar-choice", JSON.stringify(selectedAvatarId));
+        renderAvatarPickers();
+        renderActiveAvatar(selectedAvatarId);
+        await persistAvatarChoice(selectedAvatarId);
+      });
+    });
+  });
+}
+
+function renderActiveAvatar(avatarId) {
+  if (!el.accountAvatar) return;
+  const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(avatarId)) || avatarOptions[0];
+  el.accountAvatar.src = avatarDataUri(avatar);
+  el.accountAvatar.alt = `${avatar.label} avatar`;
+}
+
+function renderAccountButton(avatarId, label) {
+  const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(avatarId)) || avatarOptions[0];
+  if (el.authAvatarThumb) {
+    el.authAvatarThumb.src = avatarDataUri(avatar);
+    el.authAvatarThumb.alt = `${avatar.label} avatar`;
+  }
+  if (el.authButtonLabel) {
+    el.authButtonLabel.textContent = label;
+  }
+}
+
+function avatarDataUri(avatar) {
+  const safeLabel = escapeHtml(avatar.label);
+  const safeColor = escapeHtml(avatar.color);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}">
+      <defs>
+        <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="${safeColor}" stop-opacity="1" />
+          <stop offset="100%" stop-color="#0b1425" stop-opacity="1" />
+        </linearGradient>
+      </defs>
+      <rect width="128" height="128" rx="28" fill="url(#g)" />
+      <circle cx="64" cy="52" r="22" fill="rgba(255,255,255,0.18)" />
+      <path d="M28 108c8-18 24-28 36-28s28 10 36 28" fill="rgba(255,255,255,0.14)" />
+      <text x="64" y="86" fill="#ffffff" font-size="22" font-family="Outfit, Arial, sans-serif" text-anchor="middle">${safeLabel.slice(0, 2).toUpperCase()}</text>
+    </svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+async function persistAvatarChoice(avatarId) {
+  const normalized = normalizeAvatarId(avatarId);
+  selectedAvatarId = normalized;
+  localStorage.setItem("cinerune:avatar-choice", JSON.stringify(normalized));
+
+  if (!state.session?.user || !state.supabase) return;
+
+  try {
+    await state.supabase.auth.updateUser({ data: { avatarId: normalized } });
+  } catch {
+    // ignore avatar sync errors
+  }
 }
 
 async function syncProgressToCloud() {
