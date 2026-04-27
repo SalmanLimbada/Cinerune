@@ -67,16 +67,27 @@ export function seasonCount(tvId) {
 }
 
 export async function episodeCount(tvId, season) {
+  const episodes = await fetchSeasonEpisodes(tvId, season);
+  return episodes.length || 0;
+}
+
+export async function fetchSeasonEpisodes(tvId, season) {
   const key = `${Number(tvId)}:${Number(season)}`;
   if (seasonEpisodeCache.has(key)) return seasonEpisodeCache.get(key);
 
   try {
     const data = await tmdbRequest(`/tv/${Number(tvId)}/season/${Number(season)}`);
-    const count = Number(data?.episodes?.length || 0) || 10;
-    seasonEpisodeCache.set(key, count);
-    return count;
+    const episodes = (data?.episodes || [])
+      .map((episode) => ({
+        episodeNumber: Number(episode?.episode_number || 0),
+        name: String(episode?.name || "").trim(),
+        airDate: String(episode?.air_date || "").trim()
+      }))
+      .filter((episode) => episode.episodeNumber > 0 && isReleasedAirDate(episode.airDate));
+    seasonEpisodeCache.set(key, episodes);
+    return episodes;
   } catch {
-    return 10;
+    return [];
   }
 }
 
@@ -660,4 +671,10 @@ function normalizeSearchText(value) {
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isReleasedAirDate(value) {
+  if (!value) return false;
+  const timestamp = Date.parse(`${value}T23:59:59Z`);
+  return Number.isFinite(timestamp) && timestamp <= Date.now();
 }

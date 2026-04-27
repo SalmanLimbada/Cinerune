@@ -4,6 +4,7 @@ import {
   fetchItemDetailsById,
   fetchRelatedById,
   episodeCount,
+  fetchSeasonEpisodes,
   seasonCount,
   titleById,
   posterById
@@ -280,25 +281,33 @@ async function hydrateEpisodeControls() {
 
 async function refillEpisodeGrid() {
   if (!el.episodeGrid) return;
-  const totalEpisodes = await episodeCount(state.id, state.season);
+  const episodes = await fetchSeasonEpisodes(state.id, state.season);
+  const totalEpisodes = episodes.length;
+
+  state.episode = totalEpisodes > 0
+    ? Math.min(Math.max(Number(state.episode || 1), 1), totalEpisodes)
+    : 1;
 
   el.episodeGrid.innerHTML = "";
   const fragment = document.createDocumentFragment();
 
-  for (let episode = 1; episode <= totalEpisodes; episode += 1) {
+  episodes.forEach((episodeInfo) => {
+    const episode = Number(episodeInfo.episodeNumber || 0);
+    if (!episode) return;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "episode-pill";
     button.dataset.episode = String(episode);
-    button.textContent = `EP${episode}: Episode ${episode}`;
+    button.textContent = `EP${episode}: ${episodeInfo.name || `Episode ${episode}`}`;
     button.classList.toggle("active", episode === state.episode);
     button.addEventListener("click", () => playEpisode(episode));
     fragment.appendChild(button);
-  }
+  });
 
   el.episodeGrid.appendChild(fragment);
-
-  el.episodeCountText.textContent = `Season ${state.season} has ${totalEpisodes} episodes.`;
+  el.episodeCountText.textContent = totalEpisodes > 0
+    ? `Season ${state.season} has ${totalEpisodes} released episode${totalEpisodes === 1 ? "" : "s"}.`
+    : `Season ${state.season} has no released episodes yet.`;
 }
 
 function playEpisode(episode) {
@@ -317,7 +326,7 @@ async function playPrevEpisode() {
     state.episode -= 1;
   } else if (state.season > 1) {
     state.season -= 1;
-    state.episode = await episodeCount(state.id, state.season);
+    state.episode = Math.max(1, await episodeCount(state.id, state.season));
   }
   await hydrateEpisodeControls();
   loadPlayer();
@@ -327,6 +336,11 @@ async function playNextEpisode() {
   if (state.mediaType !== "tv") return;
   const totalEpisodes = await episodeCount(state.id, state.season);
   const totalSeasons = Math.max(1, Number(seasonCount(state.id) || state.item.totalSeasons || 1));
+
+  if (totalEpisodes < 1) {
+    setStatus(`Season ${state.season} has no released episodes yet.`);
+    return;
+  }
 
   if (state.episode < totalEpisodes) {
     state.episode += 1;
