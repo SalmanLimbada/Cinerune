@@ -457,7 +457,12 @@ async function hydrateContinueRow() {
   });
 
   el.continueSection.removeAttribute("hidden");
-  renderPosterCards(el.continueGrid, items, { showProgressMeta: true, rowMode: true, allowContinueRemove: true });
+  renderPosterCards(el.continueGrid, items, {
+    showProgressMeta: true,
+    rowMode: true,
+    allowContinueRemove: true,
+    resumeOnClick: true
+  });
 }
 
 function renderPosterCards(container, items, options = {}) {
@@ -499,12 +504,15 @@ function renderPosterCards(container, items, options = {}) {
     }
 
     button.addEventListener("click", () => {
-      openWatchPage(
+      const resume = Boolean(options.resumeOnClick);
+      const href = buildWatchHref(
         item.id,
         item.mediaType,
         item.season || item.defaultSeason || 1,
-        item.episode || item.defaultEpisode || 1
+        item.episode || item.defaultEpisode || 1,
+        resume
       );
+      window.location.href = href;
     });
 
     fragment.appendChild(node);
@@ -722,16 +730,25 @@ function updateContinueWatchingLink(entry) {
     return;
   }
 
-  el.continueWatchingLink.href = buildWatchHref(entry.id, entry.mediaType, entry.season || 1, entry.episode || 1);
+  el.continueWatchingLink.href = buildWatchHref(
+    entry.id,
+    entry.mediaType,
+    entry.season || 1,
+    entry.episode || 1,
+    true
+  );
 }
 
-function buildWatchHref(id, mediaType, season, episode) {
+function buildWatchHref(id, mediaType, season, episode, resume = false) {
   const url = new URL("./watch.html", window.location.href);
   url.searchParams.set("id", String(id));
   url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
   if (mediaType === "tv") {
     url.searchParams.set("s", String(season || 1));
     url.searchParams.set("e", String(episode || 1));
+  }
+  if (resume) {
+    url.searchParams.set("resume", "1");
   }
   return url.toString();
 }

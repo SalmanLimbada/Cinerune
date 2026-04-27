@@ -76,6 +76,7 @@ const state = {
   season: Number(query.get("s")) || 1,
   episode: Number(query.get("e")) || 1,
   server: Number(query.get("server")) === 2 ? 2 : 1,
+  resumeMode: query.get("resume") === "1",
   settings: readJson(settingsKey, {
     autoPlay: false,
     nextEpisode: true,
@@ -359,13 +360,20 @@ function loadPlayer() {
     : `${PLAYER_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
 
   const url = new URL(baseUrl);
-  if (state.settings.autoPlay) url.searchParams.set("autoPlay", "true");
+  if (state.settings.autoPlay || state.resumeMode) url.searchParams.set("autoPlay", "true");
   if (state.mediaType === "tv") url.searchParams.set("nextEpisode", "true");
   url.searchParams.set("server", String(state.server));
 
   const resume = getSavedProgress();
-  if (resume?.timestamp > 0) {
-    url.searchParams.set("progress", String(Math.floor(Number(resume.timestamp))));
+  if (resume?.timestamp > 0 && Number(resume.progress || 0) < 98) {
+    const duration = Number(resume.duration || 0);
+    let safeTimestamp = Math.floor(Number(resume.timestamp));
+    if (duration > 0) {
+      safeTimestamp = Math.min(Math.max(safeTimestamp, 0), Math.max(duration - 5, 0));
+    }
+    if (safeTimestamp > 2) {
+      url.searchParams.set("progress", String(safeTimestamp));
+    }
   }
 
   el.playerFrame.src = url.toString();
