@@ -24,7 +24,7 @@
       </nav>
 
       <div class="header-actions">
-        <a class="pill-btn ghost" href="./lists.html">My Lists</a>
+        <a id="homeListsLink" class="pill-btn ghost" href="./lists.html" hidden>My Lists</a>
         <div id="notificationsWrap" class="account-menu-wrap" hidden>
           <button id="notificationsBtn" class="icon-pill" type="button" aria-label="Notifications" aria-expanded="false">
             <span class="notif-icon" aria-hidden="true">&#128276;</span>
@@ -65,21 +65,47 @@
       <div class="auth-backdrop" id="authBackdrop"></div>
       <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
         <button id="closeAuth" class="auth-close" type="button" aria-label="Close account dialog">x</button>
-        <div class="account-grid" id="signedOutView">
-          <h2 id="authTitle">Welcome Back</h2>
-          <label>
-            <span>Username or Email</span>
-            <input id="authIdentifier" type="text" placeholder="username or email" />
-          </label>
-          <label>
-            <span>Password</span>
-            <input id="authPassword" type="password" placeholder="your password" />
-          </label>
-          <div class="account-actions">
-            <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
-            <button id="signUpBtn" class="pill-btn ghost" type="button">Create Account</button>
+        <div class="auth-mode-switch" role="tablist" aria-label="Account mode">
+          <button id="loginTabBtn" class="auth-mode-btn active" type="button">Sign In</button>
+          <button id="signupTabBtn" class="auth-mode-btn" type="button">Create Account</button>
+        </div>
+
+        <div id="signedOutView" class="account-grid">
+          <div id="authLoginView" class="account-grid">
+            <h2 id="authTitle">Sign In</h2>
+            <label>
+              <span>Username or Email</span>
+              <input id="authIdentifier" type="text" placeholder="username or email" />
+            </label>
+            <label>
+              <span>Password</span>
+              <input id="authPassword" type="password" placeholder="your password" />
+            </label>
+            <div class="account-actions">
+              <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
+            </div>
           </div>
-          <p id="authHint" class="tiny muted">Sign in to save your lists.</p>
+
+          <div id="authSignupView" class="account-grid" hidden>
+            <h2>Create Account</h2>
+            <label>
+              <span>Username</span>
+              <input id="signupUsername" type="text" placeholder="pick a username" />
+            </label>
+            <label>
+              <span>Password</span>
+              <input id="signupPassword" type="password" placeholder="create a password" />
+            </label>
+            <label>
+              <span>Confirm Password</span>
+              <input id="signupConfirm" type="password" placeholder="re-enter your password" />
+            </label>
+            <div class="account-actions">
+              <button id="signUpBtn" class="pill-btn" type="button">Create Account</button>
+            </div>
+          </div>
+
+          <p id="authHint" class="tiny muted"></p>
         </div>
 
         <div id="signedInView" hidden>

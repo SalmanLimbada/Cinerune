@@ -31,6 +31,7 @@ const el = {
   notificationsBadge: document.getElementById("notificationsBadge"),
   notificationsMenu: document.getElementById("notificationsMenu"),
   notificationsList: document.getElementById("notificationsList"),
+  homeListsLink: document.getElementById("homeListsLink"),
   toggleAuth: document.getElementById("toggleAuth"),
   accountMenuWrap: document.getElementById("accountMenuWrap"),
   accountMenu: document.getElementById("accountMenu"),
@@ -39,11 +40,18 @@ const el = {
   authModal: document.getElementById("authModal"),
   authBackdrop: document.getElementById("authBackdrop"),
   closeAuth: document.getElementById("closeAuth"),
+  loginTabBtn: document.getElementById("loginTabBtn"),
+  signupTabBtn: document.getElementById("signupTabBtn"),
+  authLoginView: document.getElementById("authLoginView"),
+  authSignupView: document.getElementById("authSignupView"),
   signedOutView: document.getElementById("signedOutView"),
   signedInView: document.getElementById("signedInView"),
   signedInHint: document.getElementById("signedInHint"),
   authIdentifier: document.getElementById("authIdentifier"),
   authPassword: document.getElementById("authPassword"),
+  signupUsername: document.getElementById("signupUsername"),
+  signupPassword: document.getElementById("signupPassword"),
+  signupConfirm: document.getElementById("signupConfirm"),
   signInBtn: document.getElementById("signInBtn"),
   signUpBtn: document.getElementById("signUpBtn"),
   signOutBtn: document.getElementById("signOutBtn"),
@@ -180,6 +188,8 @@ function bindEvents() {
   if (el.signUpBtn) el.signUpBtn.addEventListener("click", signUp);
   if (el.signOutBtn) el.signOutBtn.addEventListener("click", signOut);
   if (el.signOutMenuBtn) el.signOutMenuBtn.addEventListener("click", signOut);
+  if (el.loginTabBtn) el.loginTabBtn.addEventListener("click", () => openAuthModal("login"));
+  if (el.signupTabBtn) el.signupTabBtn.addEventListener("click", () => openAuthModal("signup"));
 
   if (el.openAccountSettings) {
     el.openAccountSettings.addEventListener("click", () => {
@@ -827,12 +837,21 @@ async function initAuth() {
 function renderAuthUI() {
   const signedIn = Boolean(state.session?.user);
   const settingsMode = authModalMode === "settings";
+  const signupMode = authModalMode === "signup";
+  const loginMode = authModalMode === "login";
+
+  el.loginTabBtn?.classList.toggle("active", loginMode);
+  el.signupTabBtn?.classList.toggle("active", signupMode);
+  el.loginTabBtn?.toggleAttribute("hidden", signedIn || settingsMode);
+  el.signupTabBtn?.toggleAttribute("hidden", signedIn || settingsMode);
   if (settingsMode && signedIn) {
     el.signedOutView.setAttribute("hidden", "");
     el.signedInView.removeAttribute("hidden");
   } else {
     el.signedOutView.toggleAttribute("hidden", signedIn);
     el.signedInView.toggleAttribute("hidden", !signedIn);
+    el.authLoginView?.toggleAttribute("hidden", !loginMode);
+    el.authSignupView?.toggleAttribute("hidden", !signupMode);
   }
 
   if (signedIn) {
@@ -843,6 +862,7 @@ function renderAuthUI() {
     renderAvatarPickers();
     renderActiveAvatar(avatarId);
     renderAccountButton(avatarId, "Account");
+    el.homeListsLink?.removeAttribute("hidden");
     if (el.toggleAuth) el.toggleAuth.title = "Open account menu";
     const authTitle = el.authModal?.querySelector("#authTitle");
     if (settingsMode) {
@@ -857,8 +877,8 @@ function renderAuthUI() {
       const signedInHint = el.signedInView.querySelector("#signedInHint");
       if (signedInProfile) signedInProfile.removeAttribute("hidden");
       if (signedInHint) signedInHint.removeAttribute("hidden");
-      if (authTitle) authTitle.textContent = "Welcome Back";
-      setAuthHint("Welcome back.");
+      if (authTitle) authTitle.textContent = loginMode ? "Sign In" : "Create Account";
+      setAuthHint("");
     }
     el.signedInHint.textContent = "You are signed in.";
   } else {
@@ -866,8 +886,9 @@ function renderAuthUI() {
     renderActiveAvatar(avatarId);
     renderAccountButton(avatarId, "Login");
     closeAccountMenu();
+    el.homeListsLink?.setAttribute("hidden", "");
     if (el.toggleAuth) el.toggleAuth.title = "Sign in";
-    setAuthHint("Sign in to save your lists.");
+    setAuthHint("");
   }
 
   if (signedIn) {
@@ -903,20 +924,22 @@ async function signIn() {
 async function signUp() {
   if (!state.supabase) return;
 
-  const identifier = String(el.authIdentifier.value || "").trim().toLowerCase();
-  const password = String(el.authPassword.value || "");
-  if (!identifier || password.length < 6) {
-    setAuthHint("Provide username/email and password (6+ chars).");
+  const username = String(el.signupUsername.value || "").trim().toLowerCase();
+  const password = String(el.signupPassword.value || "");
+  const confirmPassword = String(el.signupConfirm.value || "");
+  if (!username || password.length < 6) {
+    setAuthHint("Provide a username and a password (6+ chars).");
+    return;
+  }
+  if (password !== confirmPassword) {
+    setAuthHint("Passwords do not match.");
     return;
   }
 
-  const isEmail = identifier.includes("@");
-  const email = isEmail ? identifier : `${identifier}@cinerune.user`;
-
   const payload = {
-    email,
+    email: `${username}@cinerune.user`,
     password,
-    options: isEmail ? { data: { avatarId: normalizeAvatarId(selectedAvatarId) } } : { data: { username: identifier, avatarId: normalizeAvatarId(selectedAvatarId) } }
+    options: { data: { username, avatarId: normalizeAvatarId(selectedAvatarId) } }
   };
 
   const { error } = await state.supabase.auth.signUp(payload);
@@ -925,7 +948,7 @@ async function signUp() {
     return;
   }
 
-  setAuthHint("Account created. If email confirmations are enabled, verify and sign in.");
+  setAuthHint("Account created. Sign in with your username and password.");
 }
 
 async function signOut() {
@@ -937,7 +960,11 @@ async function signOut() {
 function onAuthEnter(event) {
   if (event.key !== "Enter") return;
   event.preventDefault();
-  signIn();
+  if (authModalMode === "signup") {
+    signUp();
+  } else {
+    signIn();
+  }
 }
 
 function normalizeAvatarId(value) {
@@ -1091,9 +1118,11 @@ function closeAccountMenu() {
   el.toggleAuth?.classList.remove("active");
 }
 
-function openAuthModal(_settingsMode = false) {
+function openAuthModal(mode = "login") {
   if (!el.authModal) return;
-  authModalMode = _settingsMode ? "settings" : "login";
+  if (mode === true) mode = "settings";
+  if (mode === false) mode = "login";
+  authModalMode = mode === "settings" || mode === "signup" ? mode : "login";
   el.authModal.removeAttribute("hidden");
   renderAuthUI();
 }
@@ -1254,6 +1283,34 @@ function setStatus(message) {
 
 function setAuthHint(message) {
   el.authHint.textContent = message;
+  const lowered = String(message || "").toLowerCase();
+  const isError = lowered.includes("failed")
+    || lowered.includes("do not match")
+    || lowered.includes("provide")
+    || lowered.includes("enter")
+    || lowered.includes("wrong");
+  if (isError) {
+    nudgeAuthCard();
+    el.authHint.classList.remove("auth-hint-flash");
+    void el.authHint.offsetWidth;
+    el.authHint.classList.add("auth-hint-flash");
+    window.clearTimeout(setAuthHint.flashTimer);
+    setAuthHint.flashTimer = window.setTimeout(() => {
+      el.authHint.classList.remove("auth-hint-flash");
+    }, 700);
+  }
+}
+
+function nudgeAuthCard() {
+  const card = el.authModal?.querySelector(".auth-card");
+  if (!card) return;
+  card.classList.remove("auth-card-shake");
+  void card.offsetWidth;
+  card.classList.add("auth-card-shake");
+  window.clearTimeout(nudgeAuthCard.timer);
+  nudgeAuthCard.timer = window.setTimeout(() => {
+    card.classList.remove("auth-card-shake");
+  }, 520);
 }
 
 function isReleasedDate(value) {

@@ -3,6 +3,8 @@ import {
   initTmdb,
   fetchItemDetailsById,
   fetchRelatedById,
+  fetchGenreOptions,
+  fetchCountryOptions,
   episodeCount,
   fetchSeasonEpisodes,
   seasonCount,
@@ -32,6 +34,12 @@ const el = {
   watchAccountBtn: document.getElementById("watchAccountBtn"),
   watchAccountMenu: document.getElementById("watchAccountMenu"),
   watchAccountSettings: document.getElementById("watchAccountSettings"),
+  watchListsLink: document.getElementById("watchListsLink"),
+  watchGenreExplorer: document.getElementById("watchGenreExplorer"),
+  watchCountryExplorer: document.getElementById("watchCountryExplorer"),
+  watchMegaMenuPanel: document.getElementById("watchMegaMenuPanel"),
+  watchMegaMenuTitle: document.getElementById("watchMegaMenuTitle"),
+  watchMegaMenuGrid: document.getElementById("watchMegaMenuGrid"),
   watchTagline: document.getElementById("watchTagline"),
   watchTitle: document.getElementById("watchTitle"),
   watchMeta: document.getElementById("watchMeta"),
@@ -88,6 +96,9 @@ const state = {
   progress: {},
   bookmarks: readJson(getBookmarksKey(null), {}),
   reports: readJson(reportsKey, []),
+  genreOptions: [],
+  countryOptions: [],
+  explorerMode: "genre",
   supabase: null,
   session: null,
   item: null,
@@ -104,6 +115,13 @@ async function boot() {
     readAccessToken: String(window.CINERUNE_CONFIG?.tmdbReadAccessToken || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
+
+  const [genresResult, countriesResult] = await Promise.allSettled([
+    fetchGenreOptions(),
+    fetchCountryOptions()
+  ]);
+  state.genreOptions = genresResult.status === "fulfilled" ? [...(genresResult.value.movie || []), ...(genresResult.value.tv || [])] : [];
+  state.countryOptions = countriesResult.status === "fulfilled" ? (countriesResult.value || []) : [];
 
   bindEvents();
   if (el.bookmarkMenu) {
@@ -155,6 +173,22 @@ function bindEvents() {
     });
   }
 
+  if (el.watchGenreExplorer) {
+    el.watchGenreExplorer.addEventListener("click", () => {
+      state.explorerMode = "genre";
+      renderWatchMegaMenu();
+      openWatchMegaMenu();
+    });
+  }
+
+  if (el.watchCountryExplorer) {
+    el.watchCountryExplorer.addEventListener("click", () => {
+      state.explorerMode = "country";
+      renderWatchMegaMenu();
+      openWatchMegaMenu();
+    });
+  }
+
   if (el.watchAccountSettings) {
     el.watchAccountSettings.addEventListener("click", () => {
       closeWatchAccountMenu();
@@ -192,6 +226,13 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     if (el.watchAccountMenuWrap && !el.watchAccountMenuWrap.contains(event.target)) {
       closeWatchAccountMenu();
+    }
+    if (!el.watchMegaMenuPanel?.hasAttribute("hidden")) {
+      const clickedToggle = el.watchGenreExplorer?.contains(event.target) || el.watchCountryExplorer?.contains(event.target);
+      const clickedInsidePanel = el.watchMegaMenuPanel.contains(event.target);
+      if (!clickedToggle && !clickedInsidePanel) {
+        closeWatchMegaMenu();
+      }
     }
     if (!el.bookmarkMenu.contains(event.target) && !el.bookmarkTrigger.contains(event.target)) {
       el.bookmarkMenu.setAttribute("hidden", "");
@@ -364,8 +405,10 @@ function loadPlayer() {
 
   const url = new URL(baseUrl);
   if (state.settings.autoPlay || state.resumeMode) url.searchParams.set("autoPlay", "true");
-  if (state.mediaType === "tv") url.searchParams.set("nextEpisode", "true");
-  url.searchParams.set("server", String(state.server));
+  if (state.mediaType === "tv") {
+    url.searchParams.set("nextEpisode", "true");
+    url.searchParams.set("episodeSelector", "true");
+  }
 
   const resume = state.resumeMode ? getSavedProgress() : null;
   let appliedResume = false;
@@ -670,11 +713,69 @@ function renderWatchAccountUI() {
     const username = state.session.user.user_metadata?.username || state.session.user.email || "Account";
     el.watchAccountBtn.textContent = username;
     el.watchAccountBtn.classList.add("active");
+    if (el.watchListsLink) el.watchListsLink.removeAttribute("hidden");
   } else {
     el.watchAccountBtn.textContent = "Login";
     el.watchAccountBtn.classList.remove("active");
     closeWatchAccountMenu();
+    if (el.watchListsLink) el.watchListsLink.setAttribute("hidden", "");
   }
+}
+
+function renderWatchMegaMenu() {
+  if (!el.watchMegaMenuTitle || !el.watchMegaMenuGrid) return;
+  const isGenre = state.explorerMode === "genre";
+  const options = isGenre ? state.genreOptions : state.countryOptions;
+  el.watchMegaMenuTitle.textContent = isGenre ? "Genres" : "Countries";
+
+  if (!options.length) {
+    el.watchMegaMenuGrid.innerHTML = "";
+    return;
+  }
+
+  el.watchMegaMenuGrid.innerHTML = options.map((entry) => {
+    const value = isGenre ? entry.id : entry.code;
+    const label = entry.name;
+    return `
+      <button class="mega-menu-item" type="button" data-mode="${state.explorerMode}" data-value="${escapeHtml(value)}" data-name="${escapeHtml(label)}">
+        ${escapeHtml(label)}
+      </button>
+    `;
+  }).join("");
+
+  [...el.watchMegaMenuGrid.querySelectorAll(".mega-menu-item")].forEach((node) => {
+    node.addEventListener("click", () => {
+      openBrowsePage(node.dataset.mode, node.dataset.value, node.dataset.name);
+      closeWatchMegaMenu();
+    });
+  });
+}
+
+function openWatchMegaMenu() {
+  if (!el.watchMegaMenuPanel) return;
+  el.watchMegaMenuPanel.removeAttribute("hidden");
+}
+
+function closeWatchMegaMenu() {
+  if (!el.watchMegaMenuPanel) return;
+  el.watchMegaMenuPanel.setAttribute("hidden", "");
+}
+
+function openBrowsePage(mode, value, name) {
+  const url = new URL("./browse.html", window.location.href);
+  url.searchParams.set("mode", mode === "country" ? "country" : "genre");
+  url.searchParams.set("value", String(value || ""));
+  if (name) url.searchParams.set("name", String(name));
+  window.location.href = url.toString();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function toggleWatchAccountMenu() {
