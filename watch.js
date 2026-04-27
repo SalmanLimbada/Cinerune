@@ -77,6 +77,9 @@ const state = {
   episode: Number(query.get("e")) || 1,
   server: Number(query.get("server")) === 2 ? 2 : 1,
   resumeMode: query.get("resume") === "1",
+  resumeFallbackTimer: null,
+  lastPlayerEventAt: 0,
+  lastPlaybackTime: 0,
   settings: readJson(settingsKey, {
     autoPlay: false,
     nextEpisode: true,
@@ -364,7 +367,8 @@ function loadPlayer() {
   if (state.mediaType === "tv") url.searchParams.set("nextEpisode", "true");
   url.searchParams.set("server", String(state.server));
 
-  const resume = getSavedProgress();
+  const resume = state.resumeMode ? getSavedProgress() : null;
+  let appliedResume = false;
   if (resume?.timestamp > 0 && Number(resume.progress || 0) < 98) {
     const duration = Number(resume.duration || 0);
     let safeTimestamp = Math.floor(Number(resume.timestamp));
@@ -373,16 +377,41 @@ function loadPlayer() {
     }
     if (safeTimestamp > 2) {
       url.searchParams.set("progress", String(safeTimestamp));
+      appliedResume = true;
     }
   }
 
   el.playerFrame.src = url.toString();
+  scheduleResumeFallback(appliedResume);
 
   if (state.mediaType === "tv") {
     setStatus(`Season ${state.season}, Episode ${state.episode} loaded.`);
   } else {
     setStatus("Player loaded.");
   }
+}
+
+function scheduleResumeFallback(appliedResume) {
+  if (state.resumeFallbackTimer) {
+    window.clearTimeout(state.resumeFallbackTimer);
+    state.resumeFallbackTimer = null;
+  }
+
+  if (!state.resumeMode || !appliedResume) return;
+
+  const startedAt = Date.now();
+  const initialPlayback = state.lastPlaybackTime;
+
+  state.resumeFallbackTimer = window.setTimeout(() => {
+    const noEvents = state.lastPlayerEventAt < startedAt;
+    const noProgress = state.lastPlaybackTime <= Math.max(initialPlayback, 1);
+    if (noEvents || noProgress) {
+      state.resumeMode = false;
+      state.lastPlaybackTime = 0;
+      state.lastPlayerEventAt = 0;
+      loadPlayer();
+    }
+  }, 7000);
 }
 
 function switchServer(serverNumber) {
@@ -572,6 +601,10 @@ function onPlayerMessage(event) {
   const season = Number(data.season) || state.season || 1;
   const episode = Number(data.episode) || state.episode || 1;
   const key = `${mediaType}:${id}:${season}:${episode}`;
+  state.lastPlayerEventAt = Date.now();
+  if (Number.isFinite(Number(data.currentTime))) {
+    state.lastPlaybackTime = Math.max(0, Number(data.currentTime) || 0);
+  }
 
   state.progress[key] = {
     mediaType,
