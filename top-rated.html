@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Search | Cinerune</title>
-    <meta name="description" content="Cinerune search results" />
+    <title>Top Rated | Cinerune</title>
+    <meta name="description" content="Cinerune top rated titles" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
@@ -16,7 +16,7 @@
 
     <header class="home-topbar">
       <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
-      <nav class="home-nav" aria-label="Search navigation">
+      <nav class="home-nav" aria-label="Top rated navigation">
         <a href="./index.html">Home</a>
         <a href="./index.html?menu=genre">Genres</a>
         <a href="./index.html?menu=country">Countries</a>
@@ -28,19 +28,20 @@
     <main class="home-shell">
       <section class="home-row">
         <div class="row-head">
-          <h2 id="searchPageTitle">Search</h2>
+          <h2 id="topRatedTitle">Top Rated</h2>
+          <div class="filter-chips">
+            <a id="topRatedMoviesLink" class="explorer-chip" href="./top-rated.html?type=movie">Movies</a>
+            <a id="topRatedTvLink" class="explorer-chip" href="./top-rated.html?type=tv">TV Shows</a>
+          </div>
         </div>
-        <div class="search-wrap search-wrap-wide">
-          <input id="searchPageInput" class="search-input" type="search" placeholder="Search movies or shows..." autocomplete="off" />
-        </div>
-        <p id="searchPageStatus" class="tiny muted">Search for a movie or show.</p>
+        <p id="topRatedStatus" class="tiny muted">Loading top rated titles...</p>
       </section>
 
       <section class="home-row">
         <div class="row-head compact">
           <h3>Results</h3>
         </div>
-        <div id="searchPageGrid" class="poster-grid"></div>
+        <div id="topRatedGrid" class="poster-grid"></div>
       </section>
     </main>
 
@@ -70,6 +71,6 @@
         document.head.appendChild(script);
       })();
     </script>
-    <script type="module" src="search.js?v=20260427f"></script>
+    <script type="module" src="top-rated.js?v=20260427f"></script>
   </body>
 </html>

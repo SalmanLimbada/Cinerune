@@ -347,6 +347,12 @@ body {
   background: linear-gradient(140deg, rgba(23, 157, 229, 0.3), rgba(110, 208, 255, 0.24));
 }
 
+.explorer-chip.active {
+  background: linear-gradient(140deg, var(--brand-a), var(--brand-b));
+  color: #041220;
+  border-color: transparent;
+}
+
 .chip {
   border: 1px solid rgba(141, 178, 206, 0.2);
   border-radius: 999px;
@@ -361,6 +367,12 @@ body {
 .chip.active {
   background: linear-gradient(140deg, var(--brand-a), var(--brand-b));
   color: #041220;
+}
+
+.chip-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 .search-input,
@@ -760,12 +772,12 @@ body {
   box-shadow: 0 0 0 1px rgba(126, 216, 255, 0.22);
 }
 
-.avatar-swatch {
-  width: 1.2rem;
-  height: 1.2rem;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--avatar-color), rgba(255, 255, 255, 0.18));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+.avatar-preview {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  flex: 0 0 auto;
 }
 
 .account-grid h2,

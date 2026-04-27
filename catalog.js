@@ -301,6 +301,31 @@ export async function fetchTitlesByCountry(countryCode, page = 1) {
   return { movies, tv };
 }
 
+export async function fetchTopRated(mediaType, pages = 2) {
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  const pageCount = Math.max(1, Math.min(5, Number(pages || 1)));
+  const path = normalizedType === "tv" ? "/tv/top_rated" : "/movie/top_rated";
+
+  const responses = await Promise.all(
+    Array.from({ length: pageCount }, (_unused, index) =>
+      tmdbRequest(path, {
+        include_adult: "false",
+        page: index + 1
+      }).catch(() => ({ results: [] }))
+    )
+  );
+
+  const items = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [])))
+    .sort((a, b) => {
+      const ratingDiff = Number(b.rating || 0) - Number(a.rating || 0);
+      if (ratingDiff !== 0) return ratingDiff;
+      return Number(b.popularity || 0) - Number(a.popularity || 0);
+    });
+
+  cacheItems(items);
+  return items;
+}
+
 export async function fetchGenreSections() {
   const [movieGenres, tvGenres] = await Promise.all([
     fetchGenres("movie"),

@@ -17,12 +17,12 @@ const progressBaseKey = "cinerune:progress";
 const bookmarksBaseKey = "cinerune:bookmarks";
 const homeCacheKey = "cinerune:home-cache";
 const avatarOptions = [
-  { id: "orbit", label: "Orbit", color: "#7ad8ff" },
-  { id: "ember", label: "Ember", color: "#ff8f6b" },
-  { id: "mint", label: "Mint", color: "#7ef0c4" },
-  { id: "sun", label: "Sun", color: "#ffd86a" },
-  { id: "violet", label: "Violet", color: "#c8a7ff" },
-  { id: "rose", label: "Rose", color: "#ff8dc7" }
+  { id: "orbit", label: "Orbit", bg1: "#7ad8ff", bg2: "#1d4263", skin: "#f0c7a5", hair: "#1f2431", shirt: "#5ec7ff", eyes: "#172232", accent: "#d9f4ff", hairStyle: "short", accessory: "none" },
+  { id: "ember", label: "Ember", bg1: "#ffb28c", bg2: "#5b2433", skin: "#d7a07f", hair: "#6e2e1f", shirt: "#ff8d6e", eyes: "#2c1b1b", accent: "#ffd4c8", hairStyle: "wave", accessory: "earring" },
+  { id: "mint", label: "Mint", bg1: "#96f0cf", bg2: "#214f56", skin: "#f3d2bb", hair: "#275b52", shirt: "#7ce2c7", eyes: "#183137", accent: "#e5fff8", hairStyle: "bob", accessory: "none" },
+  { id: "sun", label: "Sun", bg1: "#ffd86a", bg2: "#6a4c21", skin: "#c98d63", hair: "#6d4b1d", shirt: "#f7bf54", eyes: "#2a1a0f", accent: "#fff0b8", hairStyle: "curl", accessory: "glasses" },
+  { id: "violet", label: "Violet", bg1: "#c8a7ff", bg2: "#37235d", skin: "#ecc1aa", hair: "#4b2b7f", shirt: "#9d79ff", eyes: "#21162f", accent: "#efe4ff", hairStyle: "long", accessory: "none" },
+  { id: "rose", label: "Rose", bg1: "#ff9ed4", bg2: "#632b55", skin: "#f1cfb6", hair: "#8f3564", shirt: "#ff82c0", eyes: "#2d1830", accent: "#ffe0f0", hairStyle: "bun", accessory: "star" }
 ];
 
 const el = {
@@ -115,6 +115,7 @@ let selectedAvatarId = readJson("cinerune:avatar-choice", "orbit");
 let authModalMode = "login";
 const startupQuery = new URLSearchParams(window.location.search);
 const startupAuthMode = startupQuery.get("auth") || startupQuery.get("modal");
+const startupMenu = startupQuery.get("menu");
 
 boot();
 
@@ -136,6 +137,12 @@ async function boot() {
     openAuthModal(true);
   } else if (startupAuthMode === "login") {
     openAuthModal(false);
+  }
+
+  if (startupMenu === "genre" || startupMenu === "country") {
+    state.explorerMode = startupMenu;
+    renderMegaMenu();
+    openMegaMenu();
   }
 
   registerServiceWorker();
@@ -888,7 +895,7 @@ function renderAvatarPickers() {
   containers.forEach((container) => {
     container.innerHTML = avatarOptions.map((avatar) => `
       <button class="avatar-option${avatar.id === activeId ? " active" : ""}" type="button" data-avatar="${avatar.id}" aria-label="Select ${avatar.label} avatar">
-        <span class="avatar-swatch" style="--avatar-color:${avatar.color}"></span>
+        <img class="avatar-preview" src="${avatarDataUri(avatar)}" alt="" aria-hidden="true" />
         <span>${avatar.label}</span>
       </button>
     `).join("");
@@ -925,21 +932,74 @@ function renderAccountButton(avatarId, label) {
 
 function avatarDataUri(avatar) {
   const safeLabel = escapeHtml(avatar.label);
-  const safeColor = escapeHtml(avatar.color);
+  const safeBg1 = escapeHtml(avatar.bg1);
+  const safeBg2 = escapeHtml(avatar.bg2);
+  const safeSkin = escapeHtml(avatar.skin);
+  const safeHair = escapeHtml(avatar.hair);
+  const safeShirt = escapeHtml(avatar.shirt);
+  const safeEyes = escapeHtml(avatar.eyes);
+  const safeAccent = escapeHtml(avatar.accent);
+  const hair = avatarHairSvg(avatar.hairStyle, safeHair);
+  const accessory = avatarAccessorySvg(avatar.accessory, safeAccent, safeEyes);
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}">
       <defs>
         <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stop-color="${safeColor}" stop-opacity="1" />
+          <stop offset="0%" stop-color="${safeBg1}" stop-opacity="1" />
           <stop offset="100%" stop-color="#0b1425" stop-opacity="1" />
         </linearGradient>
+        <linearGradient id="g2" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="${safeBg1}" stop-opacity="1" />
+          <stop offset="100%" stop-color="${safeBg2}" stop-opacity="1" />
+        </linearGradient>
       </defs>
-      <rect width="128" height="128" rx="28" fill="url(#g)" />
-      <circle cx="64" cy="52" r="22" fill="rgba(255,255,255,0.18)" />
-      <path d="M28 108c8-18 24-28 36-28s28 10 36 28" fill="rgba(255,255,255,0.14)" />
-      <text x="64" y="86" fill="#ffffff" font-size="22" font-family="Outfit, Arial, sans-serif" text-anchor="middle">${safeLabel.slice(0, 2).toUpperCase()}</text>
+      <rect width="128" height="128" rx="28" fill="url(#g2)" />
+      <circle cx="104" cy="22" r="14" fill="rgba(255,255,255,0.1)" />
+      <circle cx="28" cy="104" r="20" fill="rgba(255,255,255,0.06)" />
+      <path d="M24 118c6-22 22-34 40-34s34 12 40 34" fill="${safeShirt}" opacity="0.95" />
+      <path d="M34 118c7-18 18-28 30-28s23 10 30 28" fill="rgba(255,255,255,0.14)" />
+      <ellipse cx="64" cy="56" rx="24" ry="28" fill="${safeSkin}" />
+      ${hair}
+      <circle cx="55" cy="56" r="2.8" fill="${safeEyes}" />
+      <circle cx="73" cy="56" r="2.8" fill="${safeEyes}" />
+      <path d="M58 68c3 3 9 3 12 0" stroke="${safeEyes}" stroke-width="3" stroke-linecap="round" fill="none" />
+      <path d="M48 49c3-2 6-3 10-3" stroke="${safeEyes}" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7" />
+      <path d="M70 46c4 0 7 1 10 3" stroke="${safeEyes}" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7" />
+      ${accessory}
     </svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function avatarHairSvg(style, color) {
+  if (style === "wave") {
+    return `<path d="M40 50c2-18 18-28 31-28 14 0 23 7 26 24-5-5-10-6-14-6-3 0-7 1-11 4-3-4-8-6-14-6-8 0-14 4-18 12z" fill="${color}" />`;
+  }
+  if (style === "bob") {
+    return `<path d="M38 50c1-19 14-30 28-30 16 0 29 11 30 30-5-5-9-7-14-7-6 0-10 3-13 6-4-4-9-6-14-6-6 0-11 2-17 7z" fill="${color}" /><path d="M41 60c-1 14 2 23 8 29l-7 3c-6-8-9-18-8-32zM87 60c1 14-2 23-8 29l7 3c6-8 9-18 8-32z" fill="${color}" />`;
+  }
+  if (style === "curl") {
+    return `<path d="M41 48c3-16 17-26 31-26s27 8 29 24c-4-3-7-5-11-5-3 0-6 1-9 3-3-5-7-8-14-8-6 0-10 2-14 7-4-3-7-4-11-4-4 0-7 2-11 9z" fill="${color}" /><circle cx="44" cy="42" r="7" fill="${color}" /><circle cx="84" cy="39" r="8" fill="${color}" />`;
+  }
+  if (style === "long") {
+    return `<path d="M40 49c2-18 17-29 31-29 16 0 29 11 30 31-4-4-9-7-15-7-6 0-11 2-16 6-4-4-9-6-15-6-5 0-10 2-15 5z" fill="${color}" /><path d="M43 58c-2 14 0 27 5 36h10c-5-9-7-22-6-36zM85 58c2 14 0 27-5 36H70c5-9 7-22 6-36z" fill="${color}" />`;
+  }
+  if (style === "bun") {
+    return `<circle cx="79" cy="25" r="10" fill="${color}" /><path d="M40 50c2-17 15-29 31-29 14 0 27 10 29 28-5-4-9-6-14-6-6 0-11 2-15 6-4-4-8-6-15-6-5 0-10 2-16 7z" fill="${color}" />`;
+  }
+  return `<path d="M40 49c4-18 16-28 30-28 15 0 27 10 30 28-6-5-11-7-16-7-7 0-12 2-16 6-3-3-8-5-15-5-5 0-9 1-13 6z" fill="${color}" />`;
+}
+
+function avatarAccessorySvg(accessory, accent, eyes) {
+  if (accessory === "earring") {
+    return `<circle cx="84" cy="66" r="2.6" fill="${accent}" />`;
+  }
+  if (accessory === "glasses") {
+    return `<rect x="47" y="51" width="14" height="10" rx="4" stroke="${eyes}" stroke-width="2" fill="none" /><rect x="67" y="51" width="14" height="10" rx="4" stroke="${eyes}" stroke-width="2" fill="none" /><path d="M61 56h6" stroke="${eyes}" stroke-width="2" />`;
+  }
+  if (accessory === "star") {
+    return `<path d="M87 43l2 5 5 1-4 3 1 5-4-3-4 3 1-5-4-3 5-1z" fill="${accent}" />`;
+  }
+  return "";
 }
 
 async function persistAvatarChoice(avatarId) {
@@ -1065,7 +1125,7 @@ function renderSearchSuggestions(items) {
 
   el.searchSuggestions.innerHTML = top.map((item, index) => {
     const type = item.mediaType === "movie" ? "Movie" : "TV";
-    const subtitle = [type, item.year, item.popularity ? `Popularity ${Math.round(item.popularity)}` : ""]
+    const subtitle = [type, item.year]
       .filter(Boolean)
       .join(" | ");
     const poster = item.poster || "";
