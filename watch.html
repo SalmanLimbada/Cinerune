@@ -126,11 +126,13 @@
     <script src="config.js"></script>
     <script>
       (function () {
+        const isLocalHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(location.hostname) || location.hostname.endsWith(".local");
+        if (!isLocalHost) {
+          return;
+        }
         const script = document.createElement("script");
         script.src = "config.local.js";
         script.async = false;
-        script.onload = () => {};
-        script.onerror = () => {};
         document.head.appendChild(script);
       })();
     </script>
