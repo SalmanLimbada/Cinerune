@@ -444,6 +444,8 @@ async function hydrateContinueRow() {
     return {
       id: entry.id,
       mediaType: entry.mediaType,
+      season: entry.season || 1,
+      episode: entry.episode || 1,
       title: apiItem?.title || entry.title || titleById(entry.id, entry.mediaType) || `Title ${entry.id}`,
       poster: apiItem?.poster || entry.poster || posterById(entry.id, entry.mediaType) || "",
       year: apiItem?.year || "",
@@ -497,7 +499,12 @@ function renderPosterCards(container, items, options = {}) {
     }
 
     button.addEventListener("click", () => {
-      openWatchPage(item.id, item.mediaType, item.defaultSeason || 1, item.defaultEpisode || 1);
+      openWatchPage(
+        item.id,
+        item.mediaType,
+        item.season || item.defaultSeason || 1,
+        item.episode || item.defaultEpisode || 1
+      );
     });
 
     fragment.appendChild(node);

@@ -306,8 +306,8 @@ async function refillEpisodeGrid() {
 
   el.episodeGrid.appendChild(fragment);
   el.episodeCountText.textContent = totalEpisodes > 0
-    ? `Season ${state.season} has ${totalEpisodes} released episode${totalEpisodes === 1 ? "" : "s"}.`
-    : `Season ${state.season} has no released episodes yet.`;
+    ? `Season ${state.season} has ${totalEpisodes} episode${totalEpisodes === 1 ? "" : "s"}.`
+    : `Season ${state.season} has no episodes yet.`;
 }
 
 function playEpisode(episode) {
@@ -338,7 +338,7 @@ async function playNextEpisode() {
   const totalSeasons = Math.max(1, Number(seasonCount(state.id) || state.item.totalSeasons || 1));
 
   if (totalEpisodes < 1) {
-    setStatus(`Season ${state.season} has no released episodes yet.`);
+    setStatus(`Season ${state.season} has no episodes yet.`);
     return;
   }
 
