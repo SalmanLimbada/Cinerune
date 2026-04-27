@@ -44,6 +44,7 @@ const el = {
   authAvatarThumb: document.getElementById("authAvatarThumb"),
   authButtonLabel: document.getElementById("authButtonLabel"),
   accountAvatar: document.getElementById("accountAvatar"),
+  continueWatchingLink: document.getElementById("continueWatchingLink"),
   avatarPicker: document.getElementById("avatarPicker"),
   signedInAvatarPicker: document.getElementById("signedInAvatarPicker"),
   heroSection: document.getElementById("heroSection"),
@@ -372,6 +373,8 @@ async function hydrateContinueRow() {
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
     .slice(0, 14);
 
+  updateContinueWatchingLink(entries[0] || null);
+
   if (!entries.length) {
     el.continueSection.setAttribute("hidden", "");
     el.continueGrid.innerHTML = "";
@@ -445,6 +448,24 @@ function openWatchPage(id, mediaType, season, episode) {
   window.location.href = url.toString();
 }
 
+function updateContinueWatchingLink(entry) {
+  if (!el.continueWatchingLink) return;
+
+  if (!entry?.id) {
+    el.continueWatchingLink.href = "./index.html#continueSection";
+    return;
+  }
+
+  const url = new URL("./watch.html", window.location.href);
+  url.searchParams.set("id", String(entry.id));
+  url.searchParams.set("type", entry.mediaType === "tv" ? "tv" : "movie");
+  if (entry.mediaType === "tv") {
+    url.searchParams.set("s", String(entry.season || 1));
+    url.searchParams.set("e", String(entry.episode || 1));
+  }
+  el.continueWatchingLink.href = url.toString();
+}
+
 async function initAuth() {
   const config = window.CINERUNE_CONFIG || {};
   const supabaseUrl = String(config.supabaseUrl || "").trim();
@@ -492,7 +513,7 @@ async function initAuth() {
 function renderAuthUI() {
   const signedIn = Boolean(state.session?.user);
   const settingsMode = authModalMode === "settings";
-  if (settingsMode) {
+  if (settingsMode && signedIn) {
     el.signedOutView.setAttribute("hidden", "");
     el.signedInView.removeAttribute("hidden");
   } else {
@@ -533,6 +554,11 @@ function renderAuthUI() {
     closeAccountMenu();
     if (el.toggleAuth) el.toggleAuth.title = "Sign in";
     setAuthHint("Sign in to save your lists.");
+  }
+
+  if (signedIn) {
+    el.authIdentifier.value = "";
+    el.authPassword.value = "";
   }
 }
 

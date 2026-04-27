@@ -7,7 +7,6 @@ import {
   seasonCount,
   titleById,
   posterById
-} from "./catalog.js?v=20260423b";
 } from "./catalog.js?v=20260427c";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
@@ -42,12 +41,9 @@ const el = {
   tvControls: document.getElementById("tvControls"),
   episodeCountText: document.getElementById("episodeCountText"),
   seasonSelect: document.getElementById("seasonSelect"),
-  episodeSelect: document.getElementById("episodeSelect"),
   prevEpisodeBtn: document.getElementById("prevEpisodeBtn"),
   nextEpisodeBtn: document.getElementById("nextEpisodeBtn"),
-  playSelectedBtn: document.getElementById("playSelectedBtn"),
   autoplayInput: document.getElementById("autoplayInput"),
-  nextEpisodeInput: document.getElementById("nextEpisodeInput"),
   autoNextSmartInput: document.getElementById("autoNextSmartInput"),
   server1Btn: document.getElementById("server1Btn"),
   server2Btn: document.getElementById("server2Btn"),
@@ -214,7 +210,6 @@ function bindEvents() {
 
 function hydrateSettingsUI() {
   el.autoplayInput.checked = Boolean(state.settings.autoPlay);
-  el.nextEpisodeInput.checked = Boolean(state.settings.nextEpisode);
   el.autoNextSmartInput.checked = Boolean(state.settings.autoNextSmart);
   el.server1Btn.classList.toggle("active", state.server === 1);
   el.server2Btn.classList.toggle("active", state.server === 2);

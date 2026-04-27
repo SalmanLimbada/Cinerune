@@ -11,6 +11,10 @@
   --brand-b: #6ed0ff;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
 }
