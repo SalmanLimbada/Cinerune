@@ -207,14 +207,14 @@ function bindEvents() {
 
   renderAvatarPickers();
 
-  if (el.showGenreExplorer) {
+  if (el.showGenreExplorer && el.showGenreExplorer.tagName === "BUTTON") {
     el.showGenreExplorer.addEventListener("click", () => {
       state.explorerMode = "genre";
       renderMegaMenu();
       openMegaMenu();
     });
   }
-  if (el.showCountryExplorer) {
+  if (el.showCountryExplorer && el.showCountryExplorer.tagName === "BUTTON") {
     el.showCountryExplorer.addEventListener("click", () => {
       state.explorerMode = "country";
       renderMegaMenu();
@@ -981,7 +981,6 @@ function renderAvatarPickers() {
     container.innerHTML = avatarOptions.map((avatar) => `
       <button class="avatar-option${avatar.id === activeId ? " active" : ""}" type="button" data-avatar="${avatar.id}" aria-label="Select ${avatar.label} avatar">
         <img class="avatar-preview" src="${avatarDataUri(avatar)}" alt="" aria-hidden="true" />
-        <span>${avatar.label}</span>
       </button>
     `).join("");
 

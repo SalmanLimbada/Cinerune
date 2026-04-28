@@ -79,6 +79,10 @@ body {
   gap: 0.35rem 1.1rem;
 }
 
+#browseOptionsGrid {
+  padding: 0.25rem 0;
+}
+
 .mega-menu-item {
   border: 0;
   background: transparent;
@@ -462,6 +466,8 @@ body {
   background: rgba(6, 22, 38, 0.98);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
   z-index: 35;
+  max-height: 60vh;
+  overflow: auto;
 }
 
 .genre-row {
@@ -567,6 +573,8 @@ body {
   background: linear-gradient(180deg, rgba(17, 31, 50, 0.96), rgba(10, 22, 39, 0.98));
   padding: 1.15rem;
   box-shadow: 0 24px 46px rgba(0, 0, 0, 0.42);
+  max-height: 88vh;
+  overflow: auto;
 }
 
 .auth-card-shake {
@@ -1241,6 +1249,21 @@ body {
   }
 }
 
+@media (max-width: 900px) {
+  .home-topbar,
+  .watch-topbar {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .header-actions,
+  .watch-top-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 860px) {
   .home-nav,
   .watch-nav {
@@ -1308,5 +1331,36 @@ body {
 
   .mega-menu-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .home-topbar,
+  .watch-topbar {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .home-logo {
+    font-size: 1.5rem;
+  }
+
+  .pill-btn,
+  .chip {
+    font-size: 0.68rem;
+    padding: 0.32rem 0.6rem;
+  }
+
+  .poster-card {
+    width: 106px;
+    min-width: 106px;
+  }
+
+  .row-head {
+    flex-wrap: wrap;
+  }
+
+  .mega-menu-inner {
+    max-height: 72vh;
+    overflow: auto;
   }
 }

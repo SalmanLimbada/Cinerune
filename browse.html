@@ -18,27 +18,25 @@
       <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
       <nav class="home-nav" aria-label="Browse navigation">
         <a href="./index.html">Home</a>
-        <button id="browseGenreExplorer" class="chip" type="button">Genre</button>
-        <button id="browseCountryExplorer" class="chip" type="button">Countries</button>
+        <a class="chip chip-link" href="./browse.html?mode=genre">Genre</a>
+        <a class="chip chip-link" href="./browse.html?mode=country">Countries</a>
         <a href="./top-rated.html?type=movie">Top Rated</a>
       </nav>
       <a class="pill-btn" href="./index.html">Back</a>
     </header>
-
-    <section id="browseMegaMenuPanel" class="mega-menu" hidden>
-      <div class="mega-menu-inner">
-        <div class="mega-menu-head">
-          <h3 id="browseMegaMenuTitle">Genres</h3>
-        </div>
-        <div id="browseMegaMenuGrid" class="mega-menu-grid"></div>
-      </div>
-    </section>
 
     <main class="home-shell">
       <section class="home-row">
         <div class="row-head">
           <h2 id="browseTitle">Browse</h2>
         </div>
+      </section>
+
+      <section id="browseOptionsSection" class="home-row">
+        <div class="row-head compact">
+          <h3>Select</h3>
+        </div>
+        <div id="browseOptionsGrid" class="mega-menu-grid"></div>
       </section>
 
       <section class="home-row">
