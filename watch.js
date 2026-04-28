@@ -373,11 +373,7 @@ function loadPlayer() {
   el.playerFrame.src = url.toString();
   scheduleResumeFallback(appliedResume);
 
-  if (state.mediaType === "tv") {
-    setStatus(`Season ${state.season}, Episode ${state.episode} loaded.`);
-  } else {
-    setStatus("Player loaded.");
-  }
+    if (state.mediaType !== "tv") setStatus("Player loaded.");
 }
 
 function scheduleResumeFallback(appliedResume) {
