@@ -83,6 +83,7 @@ const el = {
   searchSuggestions: document.getElementById("searchSuggestions"),
   searchResultsSection: document.getElementById("searchResultsSection"),
   searchResultsGrid: document.getElementById("searchResultsGrid"),
+  searchPagination: document.getElementById("searchPagination"),
   posterCardTemplate: document.getElementById("posterCardTemplate")
 };
 
@@ -103,6 +104,8 @@ const state = {
   explorerMode: "genre",
   searchTerm: "",
   searchResults: [],
+  searchPage: 1,
+  searchTotalPages: 1,
   notifications: [],
   autoSyncTimer: null,
   lastSyncAt: 0,
@@ -204,6 +207,9 @@ function bindEvents() {
   if (el.authPassword) {
     el.authPassword.addEventListener("keydown", onAuthEnter);
   }
+  [el.signupUsername, el.signupPassword, el.signupConfirm].forEach((input) => {
+    if (input) input.addEventListener("keydown", onAuthEnter);
+  });
 
   renderAvatarPickers();
 
@@ -233,10 +239,13 @@ function bindEvents() {
       }
 
       try {
-        const result = await searchCatalog(state.searchTerm);
+        state.searchPage = 1;
+        const result = await searchCatalog(state.searchTerm, { page: state.searchPage });
         const merged = (result.all || [...result.movies, ...result.tv]).slice(0, 24);
         state.searchResults = merged;
+        state.searchTotalPages = Math.max(1, Number(result.totalPages || 1));
         renderSearchResults(merged);
+        renderSearchPagination();
         renderSearchSuggestions(state.searchResults);
       } catch {
         hideSearchSuggestions();
@@ -817,7 +826,6 @@ async function initAuth() {
       }
       if (session?.user) {
         pullCloudProgress();
-        queueAutoSync(true);
       } else {
         refreshPersonalizedCollections();
         hydrateContinueRow();
@@ -1180,6 +1188,12 @@ async function pullCloudProgress() {
     const season = Number(row.season_number) || 1;
     const episode = Number(row.episode_number) || 1;
     const key = `${mediaType}:${id}:${season}:${episode}`;
+    const cloudUpdatedAt = Date.parse(row.updated_at || "") || 0;
+    const existing = state.progress[key];
+
+    if (existing && cloudUpdatedAt <= Number(existing.updatedAt || 0)) {
+      return;
+    }
 
     state.progress[key] = {
       mediaType,
@@ -1189,7 +1203,7 @@ async function pullCloudProgress() {
       timestamp: Number(row.timestamp_seconds) || 0,
       duration: Number(row.duration_seconds) || 0,
       progress: Number(row.progress_percent) || 0,
-      updatedAt: Date.parse(row.updated_at || "") || Date.now(),
+      updatedAt: cloudUpdatedAt || Date.now(),
       title: titleById(id, mediaType) || `Title ${id}`,
       poster: posterById(id, mediaType) || ""
     };
@@ -1198,7 +1212,6 @@ async function pullCloudProgress() {
   localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
   await hydrateContinueRow();
   await refreshPersonalizedCollections();
-  queueAutoSync(true);
 }
 
 function renderSearchSuggestions(items) {
@@ -1251,12 +1264,72 @@ function renderSearchResults(items) {
 
   el.searchResultsSection.removeAttribute("hidden");
   renderPosterCards(el.searchResultsGrid, topResults);
+  renderSearchPagination();
 }
 
 function hideSearchResults() {
   if (!el.searchResultsSection || !el.searchResultsGrid) return;
   el.searchResultsSection.setAttribute("hidden", "");
   el.searchResultsGrid.innerHTML = "";
+  if (el.searchPagination) {
+    el.searchPagination.setAttribute("hidden", "");
+    el.searchPagination.innerHTML = "";
+  }
+}
+
+function renderSearchPagination() {
+  if (!el.searchPagination) return;
+  const totalPages = Math.max(1, Number(state.searchTotalPages || 1));
+  if (totalPages <= 1) {
+    el.searchPagination.setAttribute("hidden", "");
+    el.searchPagination.innerHTML = "";
+    return;
+  }
+
+  const current = Math.max(1, Number(state.searchPage || 1));
+  const pages = buildPagerPages(current, totalPages);
+  el.searchPagination.innerHTML = pages.map((entry) => {
+    if (entry.type === "gap") {
+      return `<span class="pager-btn ghost">…</span>`;
+    }
+    const active = entry.page === current ? " active" : "";
+    return `<button class="pager-btn${active}" type="button" data-page="${entry.page}">${entry.label}</button>`;
+  }).join("");
+
+  [...el.searchPagination.querySelectorAll(".pager-btn[data-page]")].forEach((node) => {
+    node.addEventListener("click", async () => {
+      const nextPage = Number(node.dataset.page || 1);
+      if (!state.searchTerm || nextPage === state.searchPage) return;
+      state.searchPage = nextPage;
+      const result = await searchCatalog(state.searchTerm, { page: state.searchPage });
+      const merged = (result.all || [...result.movies, ...result.tv]).slice(0, 24);
+      state.searchResults = merged;
+      state.searchTotalPages = Math.max(1, Number(result.totalPages || 1));
+      renderSearchResults(merged);
+    });
+  });
+
+  el.searchPagination.removeAttribute("hidden");
+}
+
+function buildPagerPages(current, total) {
+  const pages = [];
+  const clamp = (value) => Math.max(1, Math.min(total, value));
+  const start = clamp(current - 2);
+  const end = clamp(current + 2);
+
+  pages.push({ type: "page", page: 1, label: "1" });
+  if (start > 2) pages.push({ type: "gap" });
+
+  for (let page = start; page <= end; page += 1) {
+    if (page === 1 || page === total) continue;
+    pages.push({ type: "page", page, label: String(page) });
+  }
+
+  if (end < total - 1) pages.push({ type: "gap" });
+  if (total > 1) pages.push({ type: "page", page: total, label: String(total) });
+
+  return pages;
 }
 
 function queueAutoSync(immediate = false) {
@@ -1277,7 +1350,8 @@ function queueAutoSync(immediate = false) {
 }
 
 function setStatus(message) {
-  void message;
+  if (!message) return;
+  console.warn("[Cinerune]", message);
 }
 
 function setAuthHint(message) {

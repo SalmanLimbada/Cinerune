@@ -264,7 +264,7 @@ export async function fetchCountryOptions() {
 
 export async function fetchTitlesByGenre(genreId, page = 1) {
   const genre = Number(genreId || 0);
-  if (!genre) return { movies: [], tv: [] };
+  if (!genre) return { movies: [], tv: [], page: 1, totalPages: 1 };
 
   const [movieData, tvData] = await Promise.all([
     tmdbRequest("/discover/movie", {
@@ -283,13 +283,17 @@ export async function fetchTitlesByGenre(genreId, page = 1) {
 
   const movies = normalizeList(movieData.results || []);
   const tv = normalizeList(tvData.results || []);
+  const totalPages = Math.max(
+    Number(movieData.total_pages || 1) || 1,
+    Number(tvData.total_pages || 1) || 1
+  );
   cacheItems([...movies, ...tv]);
-  return { movies, tv };
+  return { movies, tv, page, totalPages };
 }
 
 export async function fetchTitlesByCountry(countryCode, page = 1) {
   const code = String(countryCode || "").trim().toUpperCase();
-  if (!code) return { movies: [], tv: [] };
+  if (!code) return { movies: [], tv: [], page: 1, totalPages: 1 };
 
   const [movieData, tvData] = await Promise.all([
     tmdbRequest("/discover/movie", {
@@ -308,8 +312,12 @@ export async function fetchTitlesByCountry(countryCode, page = 1) {
 
   const movies = normalizeList(movieData.results || []);
   const tv = normalizeList(tvData.results || []);
+  const totalPages = Math.max(
+    Number(movieData.total_pages || 1) || 1,
+    Number(tvData.total_pages || 1) || 1
+  );
   cacheItems([...movies, ...tv]);
-  return { movies, tv };
+  return { movies, tv, page, totalPages };
 }
 
 export async function fetchTopRated(mediaType, pages = 2) {
@@ -377,27 +385,36 @@ export async function fetchGenreSections() {
 
 export async function searchCatalog(query, options = {}) {
   const text = String(query || "").trim();
-  if (!text) return { all: [], movies: [], tv: [] };
+  if (!text) return { all: [], movies: [], tv: [], page: 1, totalPages: 1 };
 
   const requestedPages = Math.max(1, Math.min(5, Number(options.pages || 1)));
+  const page = Math.max(1, Number(options.page || 1));
   const responses = await Promise.all(
-    Array.from({ length: requestedPages }, (_unused, index) =>
-      tmdbRequest("/search/multi", {
+    Array.from({ length: requestedPages }, (_unused, index) => {
+      const requestPage = requestedPages > 1 ? index + 1 : page;
+      return tmdbRequest("/search/multi", {
         query: text,
         include_adult: "false",
-        page: index + 1
-      }).catch(() => ({ results: [] }))
-    )
+        page: requestPage
+      }).catch(() => ({ results: [], total_pages: 1 }));
+    })
   );
 
   const normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [])))
     .sort((a, b) => scoreSearchResult(b, text) - scoreSearchResult(a, text));
   cacheItems(normalized);
 
+  const totalPages = Math.max(
+    1,
+    ...responses.map((response) => Number(response.total_pages || 1) || 1)
+  );
+
   return {
     all: normalized,
     movies: normalized.filter((item) => item.mediaType === "movie"),
-    tv: normalized.filter((item) => item.mediaType === "tv")
+    tv: normalized.filter((item) => item.mediaType === "tv"),
+    page,
+    totalPages
   };
 }
 

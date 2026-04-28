@@ -51,10 +51,6 @@ const el = {
   seasonSelect: document.getElementById("seasonSelect"),
   prevEpisodeBtn: document.getElementById("prevEpisodeBtn"),
   nextEpisodeBtn: document.getElementById("nextEpisodeBtn"),
-  autoplayInput: document.getElementById("autoplayInput"),
-  autoNextSmartInput: document.getElementById("autoNextSmartInput"),
-  server1Btn: document.getElementById("server1Btn"),
-  server2Btn: document.getElementById("server2Btn"),
   episodeGrid: document.getElementById("episodeGrid"),
   relatedRail: document.getElementById("relatedRail"),
   relatedPrevBtn: document.getElementById("relatedPrevBtn"),
@@ -76,7 +72,6 @@ const state = {
   id: Number(query.get("id")) || 0,
   season: Number(query.get("s")) || 1,
   episode: Number(query.get("e")) || 1,
-  server: 1,
   resumeMode: query.get("resume") === "1",
   resumeFallbackTimer: null,
   lastPlayerEventAt: 0,
@@ -111,7 +106,6 @@ async function boot() {
   if (el.bookmarkMenu) {
     el.bookmarkMenu.setAttribute("hidden", "");
   }
-  hydrateSettingsUI();
   await initAuth();
 
   if (!state.id) {
@@ -132,9 +126,6 @@ async function boot() {
 }
 
 function bindEvents() {
-  el.autoplayInput.addEventListener("change", saveSettings);
-  el.autoNextSmartInput.addEventListener("change", saveSettings);
-
   el.prevEpisodeBtn.addEventListener("click", playPrevEpisode);
   el.nextEpisodeBtn.addEventListener("click", playNextEpisode);
 
@@ -142,10 +133,8 @@ function bindEvents() {
     state.season = Number(el.seasonSelect.value) || 1;
     state.episode = 1;
     await refillEpisodeGrid();
+    loadPlayer();
   });
-
-  el.server1Btn.addEventListener("click", () => switchServer(1));
-  el.server2Btn.addEventListener("click", () => switchServer(2));
 
   if (el.watchAccountBtn) {
     el.watchAccountBtn.addEventListener("click", () => {
@@ -223,12 +212,6 @@ function bindEvents() {
   });
 }
 
-function hydrateSettingsUI() {
-  el.autoplayInput.checked = Boolean(state.settings.autoPlay);
-  el.autoNextSmartInput.checked = Boolean(state.settings.autoNextSmart);
-  el.server1Btn.classList.toggle("active", state.server === 1);
-  el.server2Btn.classList.toggle("active", state.server === 2);
-}
 
 function hydrateInfo() {
   const item = state.item;
@@ -361,6 +344,7 @@ async function playNextEpisode() {
 }
 
 function loadPlayer() {
+  el.playerFrame.src = "";
   const baseUrl = state.mediaType === "movie"
     ? `${PLAYER_BASE}/movie/${state.id}`
     : `${PLAYER_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
@@ -409,7 +393,7 @@ function scheduleResumeFallback(appliedResume) {
 
   state.resumeFallbackTimer = window.setTimeout(() => {
     const noEvents = state.lastPlayerEventAt < startedAt;
-    const noProgress = state.lastPlaybackTime <= Math.max(initialPlayback, 1);
+    const noProgress = state.lastPlaybackTime <= initialPlayback;
     if (noEvents || noProgress) {
       state.resumeMode = false;
       state.lastPlaybackTime = 0;
@@ -419,21 +403,6 @@ function scheduleResumeFallback(appliedResume) {
   }, 7000);
 }
 
-function switchServer(serverNumber) {
-  state.server = serverNumber === 2 ? 2 : 1;
-  el.server1Btn.classList.toggle("active", state.server === 1);
-  el.server2Btn.classList.toggle("active", state.server === 2);
-  loadPlayer();
-}
-
-function saveSettings() {
-  state.settings = {
-    autoPlay: el.autoplayInput.checked,
-    nextEpisode: true,
-    autoNextSmart: el.autoNextSmartInput.checked
-  };
-  localStorage.setItem(settingsKey, JSON.stringify(state.settings));
-}
 
 async function renderRelated() {
   const related = await fetchRelatedById(state.id, state.mediaType);
@@ -707,7 +676,7 @@ async function syncProgressToCloud() {
     return;
   }
 
-  const rows = Object.values(state.progress).slice(-200).map((entry) => ({
+  const rows = Object.values(state.progress).slice(-240).map((entry) => ({
     user_id: state.session.user.id,
     media_type: entry.mediaType,
     content_id: entry.id,

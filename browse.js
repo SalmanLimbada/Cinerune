@@ -10,12 +10,14 @@ const query = new URLSearchParams(window.location.search);
 const mode = query.get("mode") === "country" ? "country" : "genre";
 const value = String(query.get("value") || "").trim();
 const name = String(query.get("name") || "").trim();
+const page = Math.max(1, Number(query.get("page") || 1));
 
 const el = {
   browseOptionsGrid: document.getElementById("browseOptionsGrid"),
   browseTitle: document.getElementById("browseTitle"),
   browseMoviesGrid: document.getElementById("browseMoviesGrid"),
   browseTvGrid: document.getElementById("browseTvGrid"),
+  browsePagination: document.getElementById("browsePagination"),
   posterCardTemplate: document.getElementById("posterCardTemplate")
 };
 
@@ -45,14 +47,16 @@ async function boot() {
 
   try {
     const data = mode === "country"
-      ? await fetchTitlesByCountry(value, 1)
-      : await fetchTitlesByGenre(Number(value), 1);
+      ? await fetchTitlesByCountry(value, page)
+      : await fetchTitlesByGenre(Number(value), page);
 
     renderPosterCards(el.browseMoviesGrid, data.movies || []);
     renderPosterCards(el.browseTvGrid, data.tv || []);
+    renderBrowsePagination(data.totalPages || 1);
   } catch {
     el.browseMoviesGrid.innerHTML = "";
     el.browseTvGrid.innerHTML = "";
+    renderBrowsePagination(1);
   }
 }
 
@@ -82,6 +86,56 @@ async function renderOptions() {
       window.location.href = url.toString();
     });
   });
+}
+
+function renderBrowsePagination(totalPages) {
+  if (!el.browsePagination) return;
+  const total = Math.max(1, Number(totalPages || 1));
+  if (total <= 1) {
+    el.browsePagination.setAttribute("hidden", "");
+    el.browsePagination.innerHTML = "";
+    return;
+  }
+
+  const pages = buildPagerPages(page, total);
+  el.browsePagination.innerHTML = pages.map((entry) => {
+    if (entry.type === "gap") {
+      return `<span class="pager-btn ghost">…</span>`;
+    }
+    const active = entry.page === page ? " active" : "";
+    return `<a class="pager-btn${active}" href="${buildBrowseHref(entry.page)}">${entry.label}</a>`;
+  }).join("");
+
+  el.browsePagination.removeAttribute("hidden");
+}
+
+function buildBrowseHref(nextPage) {
+  const url = new URL("./browse.html", window.location.href);
+  url.searchParams.set("mode", mode === "country" ? "country" : "genre");
+  if (value) url.searchParams.set("value", value);
+  if (name) url.searchParams.set("name", name);
+  url.searchParams.set("page", String(nextPage));
+  return url.toString();
+}
+
+function buildPagerPages(current, total) {
+  const pages = [];
+  const clamp = (value) => Math.max(1, Math.min(total, value));
+  const start = clamp(current - 2);
+  const end = clamp(current + 2);
+
+  pages.push({ type: "page", page: 1, label: "1" });
+  if (start > 2) pages.push({ type: "gap" });
+
+  for (let p = start; p <= end; p += 1) {
+    if (p === 1 || p === total) continue;
+    pages.push({ type: "page", page: p, label: String(p) });
+  }
+
+  if (end < total - 1) pages.push({ type: "gap" });
+  if (total > 1) pages.push({ type: "page", page: total, label: String(total) });
+
+  return pages;
 }
 
 function escapeHtml(value) {

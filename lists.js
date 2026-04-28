@@ -119,15 +119,13 @@ function renderList(container, entries) {
   const fragment = document.createDocumentFragment();
 
   entries.forEach((item) => {
-    if (!item.poster) return;
-
     const node = el.posterCardTemplate.content.firstElementChild.cloneNode(true);
     const button = node.querySelector(".poster-btn");
     const image = node.querySelector(".poster-img");
     const title = node.querySelector(".poster-title");
     const sub = node.querySelector(".poster-sub");
 
-    image.src = item.poster;
+    image.src = item.poster || buildPosterPlaceholder(item.title);
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
     sub.textContent = [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
@@ -140,6 +138,28 @@ function renderList(container, entries) {
   });
 
   container.appendChild(fragment);
+}
+
+function buildPosterPlaceholder(title) {
+  const safeTitle = String(title || "Title").slice(0, 24);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
+      <defs>
+        <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#1a3552" />
+          <stop offset="100%" stop-color="#0f1f33" />
+        </linearGradient>
+      </defs>
+      <rect width="300" height="450" fill="url(#g)" />
+      <rect x="20" y="20" width="260" height="410" rx="18" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)" />
+      <text x="150" y="220" fill="#d8e8f8" font-family="Outfit, sans-serif" font-size="20" font-weight="600" text-anchor="middle">
+        ${safeTitle}
+      </text>
+      <text x="150" y="250" fill="#9fb6d0" font-family="Outfit, sans-serif" font-size="12" text-anchor="middle">
+        No poster available
+      </text>
+    </svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 function renderEmpty(container) {
