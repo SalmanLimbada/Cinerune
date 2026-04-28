@@ -1,5 +1,7 @@
 import {
   initTmdb,
+  fetchGenreOptions,
+  fetchCountryOptions,
   fetchItemsByIds,
   titleById,
   posterById
@@ -14,6 +16,11 @@ function getBookmarksKey(session) {
 }
 
 const el = {
+  listsGenreExplorer: document.getElementById("listsGenreExplorer"),
+  listsCountryExplorer: document.getElementById("listsCountryExplorer"),
+  listsMegaMenuPanel: document.getElementById("listsMegaMenuPanel"),
+  listsMegaMenuTitle: document.getElementById("listsMegaMenuTitle"),
+  listsMegaMenuGrid: document.getElementById("listsMegaMenuGrid"),
   listsStatus: document.getElementById("listsStatus"),
   listWatching: document.getElementById("listWatching"),
   listWatched: document.getElementById("listWatched"),
@@ -24,7 +31,10 @@ const el = {
 
 const state = {
   supabase: null,
-  session: null
+  session: null,
+  genreOptions: [],
+  countryOptions: [],
+  explorerMode: "genre"
 };
 
 boot();
@@ -35,6 +45,14 @@ async function boot() {
     readAccessToken: String(window.CINERUNE_CONFIG?.tmdbReadAccessToken || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
+
+  bindMegaMenu();
+  const [genresResult, countriesResult] = await Promise.allSettled([
+    fetchGenreOptions(),
+    fetchCountryOptions()
+  ]);
+  state.genreOptions = genresResult.status === "fulfilled" ? [...(genresResult.value.movie || []), ...(genresResult.value.tv || [])] : [];
+  state.countryOptions = countriesResult.status === "fulfilled" ? (countriesResult.value || []) : [];
 
   await initAuth();
 
@@ -58,6 +76,88 @@ async function boot() {
   renderList(el.listDropped, hydrated.filter((item) => item.status === "dropped"));
 
   el.listsStatus.textContent = `${hydrated.length} saved title${hydrated.length === 1 ? "" : "s"}.`;
+}
+
+function bindMegaMenu() {
+  if (el.listsGenreExplorer) {
+    el.listsGenreExplorer.addEventListener("click", () => {
+      state.explorerMode = "genre";
+      renderListsMegaMenu();
+      openListsMegaMenu();
+    });
+  }
+
+  if (el.listsCountryExplorer) {
+    el.listsCountryExplorer.addEventListener("click", () => {
+      state.explorerMode = "country";
+      renderListsMegaMenu();
+      openListsMegaMenu();
+    });
+  }
+
+  document.addEventListener("click", (event) => {
+    if (!el.listsMegaMenuPanel || el.listsMegaMenuPanel.hasAttribute("hidden")) return;
+    const clickedToggle = el.listsGenreExplorer?.contains(event.target) || el.listsCountryExplorer?.contains(event.target);
+    const clickedInside = el.listsMegaMenuPanel.contains(event.target);
+    if (!clickedToggle && !clickedInside) {
+      closeListsMegaMenu();
+    }
+  });
+}
+
+function renderListsMegaMenu() {
+  if (!el.listsMegaMenuTitle || !el.listsMegaMenuGrid) return;
+  const isGenre = state.explorerMode === "genre";
+  const options = isGenre ? state.genreOptions : state.countryOptions;
+  el.listsMegaMenuTitle.textContent = isGenre ? "Genres" : "Countries";
+  if (!options.length) {
+    el.listsMegaMenuGrid.innerHTML = "";
+    return;
+  }
+
+  el.listsMegaMenuGrid.innerHTML = options.map((entry) => {
+    const value = isGenre ? entry.id : entry.code;
+    const label = entry.name;
+    return `
+      <button class="mega-menu-item" type="button" data-mode="${state.explorerMode}" data-value="${escapeHtml(value)}" data-name="${escapeHtml(label)}">
+        ${escapeHtml(label)}
+      </button>
+    `;
+  }).join("");
+
+  [...el.listsMegaMenuGrid.querySelectorAll(".mega-menu-item")].forEach((node) => {
+    node.addEventListener("click", () => {
+      openBrowsePage(node.dataset.mode, node.dataset.value, node.dataset.name);
+      closeListsMegaMenu();
+    });
+  });
+}
+
+function openListsMegaMenu() {
+  if (!el.listsMegaMenuPanel) return;
+  el.listsMegaMenuPanel.removeAttribute("hidden");
+}
+
+function closeListsMegaMenu() {
+  if (!el.listsMegaMenuPanel) return;
+  el.listsMegaMenuPanel.setAttribute("hidden", "");
+}
+
+function openBrowsePage(mode, value, name) {
+  const url = new URL("./browse.html", window.location.href);
+  url.searchParams.set("mode", mode === "country" ? "country" : "genre");
+  url.searchParams.set("value", String(value || ""));
+  if (name) url.searchParams.set("name", String(name));
+  window.location.href = url.toString();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 async function initAuth() {

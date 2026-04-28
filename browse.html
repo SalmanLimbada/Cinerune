@@ -18,12 +18,21 @@
       <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
       <nav class="home-nav" aria-label="Browse navigation">
         <a href="./index.html">Home</a>
-        <a href="./index.html?menu=genre">Genres</a>
-        <a href="./index.html?menu=country">Countries</a>
+        <button id="browseGenreExplorer" class="chip" type="button">Genre</button>
+        <button id="browseCountryExplorer" class="chip" type="button">Countries</button>
         <a href="./top-rated.html?type=movie">Top Rated</a>
       </nav>
       <a class="pill-btn" href="./index.html">Back</a>
     </header>
+
+    <section id="browseMegaMenuPanel" class="mega-menu" hidden>
+      <div class="mega-menu-inner">
+        <div class="mega-menu-head">
+          <h3 id="browseMegaMenuTitle">Genres</h3>
+        </div>
+        <div id="browseMegaMenuGrid" class="mega-menu-grid"></div>
+      </div>
+    </section>
 
     <main class="home-shell">
       <section class="home-row">
