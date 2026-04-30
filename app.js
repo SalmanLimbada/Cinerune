@@ -87,6 +87,9 @@ const el = {
   popularGrid: document.getElementById("popularGrid"),
   searchInput: document.getElementById("searchInput"),
   searchSuggestions: document.getElementById("searchSuggestions"),
+  navSearchBtn: document.getElementById("navSearchBtn"),
+  navSearchInput: document.getElementById("navSearchInput"),
+  navSearchForm: document.getElementById("navSearchForm"),
   searchResultsSection: document.getElementById("searchResultsSection"),
   searchResultsGrid: document.getElementById("searchResultsGrid"),
   searchPagination: document.getElementById("searchPagination"),
@@ -267,12 +270,34 @@ function bindEvents() {
     });
   }
 
+  if (el.navSearchBtn && el.navSearchInput) {
+    el.navSearchBtn.addEventListener("click", () => {
+      if (el.navSearchInput.hasAttribute("hidden")) {
+        el.navSearchInput.removeAttribute("hidden");
+        el.navSearchInput.focus();
+      } else if (el.navSearchInput.value.trim()) {
+        el.navSearchForm?.submit();
+      } else {
+        el.navSearchInput.setAttribute("hidden", "");
+      }
+    });
+    el.navSearchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (el.navSearchInput.value.trim()) el.navSearchForm?.submit();
+      }
+    });
+  }
+
   document.addEventListener("click", (event) => {
     if (el.accountMenuWrap && !el.accountMenuWrap.contains(event.target)) {
       closeAccountMenu();
     }
     if (el.notificationsWrap && !el.notificationsWrap.contains(event.target)) {
       closeNotificationsMenu();
+    }
+    if (el.navSearchForm && !el.navSearchForm.contains(event.target)) {
+      el.navSearchInput?.setAttribute("hidden", "");
     }
     if (!el.searchInput || !el.searchSuggestions) return;
     if (event.target === el.searchInput || el.searchSuggestions.contains(event.target)) return;
@@ -1056,65 +1081,179 @@ function avatarDataUri(avatar) {
   const safeShirt = escapeHtml(avatar.shirt);
   const safeEyes = escapeHtml(avatar.eyes);
   const safeAccent = escapeHtml(avatar.accent);
-  const hair = avatarHairSvg(avatar.hairStyle, safeHair);
+
+  const backHair = avatarBackHairSvg(avatar.hairStyle, safeHair);
+  const frontHair = avatarFrontHairSvg(avatar.hairStyle, safeHair);
   const accessory = avatarAccessorySvg(avatar.accessory, safeAccent, safeEyes);
+
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}">
       <defs>
-        <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stop-color="${safeBg1}" stop-opacity="1" />
-          <stop offset="100%" stop-color="#0b1425" stop-opacity="1" />
-        </linearGradient>
-        <linearGradient id="g2" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stop-color="${safeBg1}" stop-opacity="1" />
-          <stop offset="100%" stop-color="${safeBg2}" stop-opacity="1" />
+        <linearGradient id="bg-${avatar.id}" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="${safeBg1}" />
+          <stop offset="100%" stop-color="${safeBg2}" />
         </linearGradient>
       </defs>
-      <rect width="128" height="128" rx="28" fill="url(#g2)" />
-      <circle cx="104" cy="22" r="14" fill="rgba(255,255,255,0.1)" />
-      <circle cx="28" cy="104" r="20" fill="rgba(255,255,255,0.06)" />
-      <path d="M24 118c6-22 22-34 40-34s34 12 40 34" fill="${safeShirt}" opacity="0.95" />
-      <path d="M34 118c7-18 18-28 30-28s23 10 30 28" fill="rgba(255,255,255,0.14)" />
-      <ellipse cx="64" cy="56" rx="24" ry="28" fill="${safeSkin}" />
-      ${hair}
-      <circle cx="55" cy="56" r="2.8" fill="${safeEyes}" />
-      <circle cx="73" cy="56" r="2.8" fill="${safeEyes}" />
-      <path d="M58 68c3 3 9 3 12 0" stroke="${safeEyes}" stroke-width="3" stroke-linecap="round" fill="none" />
-      <path d="M48 49c3-2 6-3 10-3" stroke="${safeEyes}" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7" />
-      <path d="M70 46c4 0 7 1 10 3" stroke="${safeEyes}" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7" />
+      
+      <!-- Background Base -->
+      <rect width="128" height="128" rx="32" fill="url(#bg-${avatar.id})" />
+
+      <!-- Back Hair Layer -->
+      ${backHair}
+
+      <!-- Body / Shoulders -->
+      <path d="M 24 128 C 24 96 104 96 104 128" fill="${safeShirt}" />
+      <!-- Inner shirt collar detail -->
+      <path d="M 44 128 C 44 104 84 104 84 128" fill="rgba(255,255,255,0.15)" />
+
+      <!-- Neck -->
+      <rect x="54" y="70" width="20" height="24" rx="8" fill="${safeSkin}" />
+      <!-- Neck Drop Shadow -->
+      <rect x="54" y="78" width="20" height="12" fill="rgba(0,0,0,0.1)" />
+
+      <!-- Head Shape -->
+      <rect x="36" y="28" width="56" height="60" rx="26" fill="${safeSkin}" />
+
+      <!-- Front Hair Layer -->
+      ${frontHair}
+
+      <!-- Eyes -->
+      <circle cx="50" cy="58" r="4" fill="${safeEyes}" />
+      <circle cx="78" cy="58" r="4" fill="${safeEyes}" />
+
+      <!-- Cute Blush -->
+      <circle cx="42" cy="66" r="5" fill="#ff0000" opacity="0.12" />
+      <circle cx="86" cy="66" r="5" fill="#ff0000" opacity="0.12" />
+
+      <!-- Smile -->
+      <path d="M 58 68 Q 64 74 70 68" stroke="${safeEyes}" stroke-width="3" stroke-linecap="round" fill="none" />
+
       ${accessory}
-    </svg>`;
+    </svg>`.replace(/\s+/g, ' ').trim();
+
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function avatarHairSvg(style, color) {
-  if (style === "wave") {
-    return `<path d="M40 50c2-18 18-28 31-28 14 0 23 7 26 24-5-5-10-6-14-6-3 0-7 1-11 4-3-4-8-6-14-6-8 0-14 4-18 12z" fill="${color}" />`;
-  }
-  if (style === "bob") {
-    return `<path d="M38 50c1-19 14-30 28-30 16 0 29 11 30 30-5-5-9-7-14-7-6 0-10 3-13 6-4-4-9-6-14-6-6 0-11 2-17 7z" fill="${color}" /><path d="M41 60c-1 14 2 23 8 29l-7 3c-6-8-9-18-8-32zM87 60c1 14-2 23-8 29l7 3c6-8 9-18 8-32z" fill="${color}" />`;
-  }
-  if (style === "curl") {
-    return `<path d="M41 48c3-16 17-26 31-26s27 8 29 24c-4-3-7-5-11-5-3 0-6 1-9 3-3-5-7-8-14-8-6 0-10 2-14 7-4-3-7-4-11-4-4 0-7 2-11 9z" fill="${color}" /><circle cx="44" cy="42" r="7" fill="${color}" /><circle cx="84" cy="39" r="8" fill="${color}" />`;
+function avatarBackHairSvg(style, color) {
+  if (style === "bald") return "";
+  if (style === "spiky") {
+    return `<path d="M 24 60 L 16 40 L 32 32 L 40 12 L 64 6 L 88 12 L 96 32 L 112 40 L 104 60 Z" fill="${color}" />`;
   }
   if (style === "long") {
-    return `<path d="M40 49c2-18 17-29 31-29 16 0 29 11 30 31-4-4-9-7-15-7-6 0-11 2-16 6-4-4-9-6-15-6-5 0-10 2-15 5z" fill="${color}" /><path d="M43 58c-2 14 0 27 5 36h10c-5-9-7-22-6-36zM85 58c2 14 0 27-5 36H70c5-9 7-22 6-36z" fill="${color}" />`;
+    return `
+      <rect x="32" y="40" width="64" height="60" rx="16" fill="${color}" />
+      <path d="M 32 80 L 32 110 C 32 120 44 120 44 110 L 44 80 Z" fill="${color}" />
+      <path d="M 96 80 L 96 110 C 96 120 84 120 84 110 L 84 80 Z" fill="${color}" />
+    `;
   }
   if (style === "bun") {
-    return `<circle cx="79" cy="25" r="10" fill="${color}" /><path d="M40 50c2-17 15-29 31-29 14 0 27 10 29 28-5-4-9-6-14-6-6 0-11 2-15 6-4-4-8-6-15-6-5 0-10 2-16 7z" fill="${color}" />`;
+    return `<circle cx="64" cy="18" r="14" fill="${color}" />`;
   }
-  return `<path d="M40 49c4-18 16-28 30-28 15 0 27 10 30 28-6-5-11-7-16-7-7 0-12 2-16 6-3-3-8-5-15-5-5 0-9 1-13 6z" fill="${color}" />`;
+  if (style === "bob") {
+    return `<rect x="30" y="36" width="68" height="48" rx="20" fill="${color}" />`;
+  }
+  if (style === "curl") {
+     return `
+       <circle cx="34" cy="46" r="16" fill="${color}" />
+       <circle cx="94" cy="46" r="16" fill="${color}" />
+       <circle cx="44" cy="24" r="18" fill="${color}" />
+       <circle cx="84" cy="24" r="18" fill="${color}" />
+       <circle cx="64" cy="16" r="20" fill="${color}" />
+     `;
+  }
+  return "";
+}
+
+function avatarFrontHairSvg(style, color) {
+  if (style === "bald") return "";
+  if (style === "spiky") {
+    return `<path d="M 32 52 L 36 26 L 48 38 L 54 18 L 64 36 L 74 18 L 80 38 L 92 26 L 96 52 Z" fill="${color}" />`;
+  }
+  if (style === "short") {
+    return `<path d="M 32 52 C 32 16 96 16 96 52 C 96 58 84 46 64 42 C 44 38 32 58 32 52 Z" fill="${color}" />`;
+  }
+  if (style === "wave") {
+    return `
+      <path d="M 34 52 Q 44 20 64 26 Q 84 20 94 52 Q 82 36 64 36 Q 46 36 34 52 Z" fill="${color}" />
+      <path d="M 64 26 Q 74 12 90 28 Q 74 18 64 26 Z" fill="${color}" opacity="0.8" />
+    `;
+  }
+  if (style === "bob") {
+    return `
+      <path d="M 36 48 C 36 20 92 20 92 48 Q 78 34 64 34 Q 50 34 36 48 Z" fill="${color}" />
+      <path d="M 30 40 L 40 40 L 40 76 C 40 84 30 84 30 76 Z" fill="${color}" />
+      <path d="M 98 40 L 88 40 L 88 76 C 88 84 98 84 98 76 Z" fill="${color}" />
+    `;
+  }
+  if (style === "curl") {
+    return `
+      <circle cx="48" cy="34" r="12" fill="${color}" />
+      <circle cx="64" cy="30" r="14" fill="${color}" />
+      <circle cx="80" cy="34" r="12" fill="${color}" />
+      <circle cx="38" cy="42" r="10" fill="${color}" />
+      <circle cx="90" cy="42" r="10" fill="${color}" />
+    `;
+  }
+  if (style === "long") {
+    return `<path d="M 36 46 C 36 20 92 20 92 46 Q 78 34 64 34 Q 50 34 36 46 Z" fill="${color}" />`;
+  }
+  if (style === "bun") {
+    return `<path d="M 36 44 C 36 20 92 20 92 44 Q 78 34 64 34 Q 50 34 36 44 Z" fill="${color}" />`;
+  }
+  return `<path d="M 32 52 C 32 16 96 16 96 52 C 96 58 84 46 64 42 C 44 38 32 58 32 52 Z" fill="${color}" />`;
 }
 
 function avatarAccessorySvg(accessory, accent, eyes) {
   if (accessory === "earring") {
-    return `<circle cx="84" cy="66" r="2.6" fill="${accent}" />`;
+    return `
+      <circle cx="34" cy="64" r="4" fill="${accent}" />
+      <circle cx="94" cy="64" r="4" fill="${accent}" />
+    `;
   }
   if (accessory === "glasses") {
-    return `<rect x="47" y="51" width="14" height="10" rx="4" stroke="${eyes}" stroke-width="2" fill="none" /><rect x="67" y="51" width="14" height="10" rx="4" stroke="${eyes}" stroke-width="2" fill="none" /><path d="M61 56h6" stroke="${eyes}" stroke-width="2" />`;
+    return `
+      <rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
+      <rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
+      <line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />
+    `;
   }
   if (accessory === "star") {
-    return `<path d="M87 43l2 5 5 1-4 3 1 5-4-3-4 3 1-5-4-3 5-1z" fill="${accent}" />`;
+    return `<path d="M 82 32 L 84 38 L 90 38 L 85 42 L 87 48 L 82 44 L 77 48 L 79 42 L 74 38 L 80 38 Z" fill="${accent}" />`;
+  }
+  if (accessory === "headband") {
+    return `
+      <rect x="36" y="36" width="56" height="12" fill="${accent}" />
+      <rect x="52" y="38" width="24" height="8" rx="2" fill="#ddd" />
+      <circle cx="56" cy="42" r="2" fill="#444" />
+      <circle cx="72" cy="42" r="2" fill="#444" />
+    `;
+  }
+  if (accessory === "strawhat") {
+    return `
+      <ellipse cx="64" cy="32" rx="46" ry="12" fill="${accent}" />
+      <path d="M 42 30 C 42 8 86 8 86 30 Z" fill="${accent}" />
+      <path d="M 43 26 C 43 28 85 28 85 26 Z" fill="#e03131" stroke="#e03131" stroke-width="3" />
+    `;
+  }
+  if (accessory === "glasses_scar") {
+    return `
+      <rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
+      <rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
+      <line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />
+      <path d="M 64 30 L 60 38 L 64 38 L 58 46" stroke="#8b0000" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    `;
+  }
+  if (accessory === "glasses_goatee") {
+    return `
+      <rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
+      <rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
+      <line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />
+      <path d="M 56 76 Q 64 90 72 76 Z" fill="${accent}" />
+      <path d="M 52 70 Q 64 62 76 70" stroke="${accent}" stroke-width="3" fill="none" stroke-linecap="round" />
+    `;
+  }
+  if (accessory === "blindfold") {
+    return `<rect x="36" y="48" width="56" height="18" fill="${accent}" />`;
   }
   return "";
 }
