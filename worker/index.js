@@ -9,7 +9,12 @@ export default {
 
     if (!url.pathname.startsWith("/api/")) {
       if (env.ASSETS?.fetch) {
-        return env.ASSETS.fetch(request);
+        const assetResponse = await env.ASSETS.fetch(request);
+        if (assetResponse.status !== 404) return assetResponse;
+
+        // Fallback for clean routes and root to keep the frontend reachable.
+        const fallbackUrl = new URL("/index.html", url.origin);
+        return env.ASSETS.fetch(new Request(fallbackUrl.toString(), request));
       }
       return new Response("Frontend assets are not configured.", { status: 500 });
     }
