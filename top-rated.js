@@ -1,7 +1,8 @@
 import {
   initTmdb,
   fetchTopRated
-} from "./catalog.js?v=20260427c";
+} from "./catalog.js?v=20260430-search";
+import { initSharedHeader } from "./shared-ui.js";
 
 const query = new URLSearchParams(window.location.search);
 const mediaType = query.get("type") === "tv" ? "tv" : "movie";
@@ -18,6 +19,7 @@ const el = {
 boot();
 
 async function boot() {
+  initSharedHeader();
   initTmdb({
     apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()

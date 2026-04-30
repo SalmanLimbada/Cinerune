@@ -185,12 +185,38 @@ async function handleAuthUpdate(request, env) {
   }
 
   const payload = await readJson(request);
-  const avatarId = normalizeAvatarId(payload?.avatarId);
-  if (!avatarId) {
+  const avatarId = payload?.avatarId === undefined ? "" : normalizeAvatarId(payload?.avatarId);
+  const username = payload?.username === undefined ? "" : normalizeUsername(payload?.username);
+  const password = payload?.password === undefined ? "" : String(payload?.password || "");
+
+  const update = {};
+  const data = {};
+
+  if (payload?.avatarId !== undefined) {
+    if (!avatarId) return jsonResponse({ error: "Invalid avatar." }, 400);
+    data.avatarId = avatarId;
+  }
+
+  if (payload?.username !== undefined) {
+    if (!username) return jsonResponse({ error: "Invalid username." }, 400);
+    data.username = username;
+    update.email = `${username}@cinerune.user`;
+  }
+
+  if (payload?.password !== undefined) {
+    if (!isValidPassword(password)) return jsonResponse({ error: "Invalid password." }, 400);
+    update.password = password;
+  }
+
+  if (Object.keys(data).length) {
+    update.data = data;
+  }
+
+  if (!Object.keys(update).length) {
     return jsonResponse({ error: "Invalid payload." }, 400);
   }
 
-  return proxySupabaseAuth(env, "/auth/v1/user", { data: { avatarId } }, token, "PUT");
+  return proxySupabaseAuth(env, "/auth/v1/user", update, token, "PUT");
 }
 
 async function handleProgressPull(request, env, url) {

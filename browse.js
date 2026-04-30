@@ -4,7 +4,8 @@ import {
   fetchCountryOptions,
   fetchTitlesByGenre,
   fetchTitlesByCountry
-} from "./catalog.js?v=20260427c";
+} from "./catalog.js?v=20260430-search";
+import { initSharedHeader } from "./shared-ui.js";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = { valueMax: 12, nameMax: 40 };
@@ -29,6 +30,7 @@ const state = {
 boot();
 
 async function boot() {
+  initSharedHeader();
   initTmdb({
     apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()

@@ -118,6 +118,56 @@ body {
   gap: 1.2rem;
 }
 
+.nav-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 0 1 260px;
+  min-width: 170px;
+}
+
+.nav-search-btn {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #d8e8f8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.nav-search-btn:hover {
+  background: rgba(126, 216, 255, 0.12);
+}
+
+.nav-search-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(145, 178, 205, 0.22);
+  border-radius: 999px;
+  background: rgba(5, 14, 27, 0.75);
+  color: #eef7ff;
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 0.48rem 0.8rem;
+  outline: none;
+}
+
+.nav-search-input:focus {
+  border-color: rgba(126, 216, 255, 0.58);
+  box-shadow: 0 0 0 2px rgba(126, 216, 255, 0.12);
+}
+
+.nav-search-suggestions {
+  top: calc(100% + 8px);
+  left: 38px;
+  right: 0;
+}
+
 
 .watch-nav.watch-nav-tools {
   display: flex;
@@ -684,6 +734,20 @@ body {
   display: grid;
   gap: 0.55rem;
   max-width: 560px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.72rem;
+  border: 1px solid rgba(145, 178, 205, 0.16);
+  border-radius: 12px;
+  background: rgba(10, 25, 44, 0.48);
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 0.95rem;
 }
 
 .account-pill {
@@ -1285,6 +1349,11 @@ body {
   .watch-topbar {
     flex-wrap: wrap;
     align-items: center;
+  }
+
+  .nav-search {
+    order: 3;
+    flex-basis: 100%;
   }
 
   .header-actions,

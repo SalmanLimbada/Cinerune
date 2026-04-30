@@ -1,4 +1,5 @@
-import { apiRequest, authHeaders, ensureSession } from "./auth-client.js";
+import { apiRequest, authHeaders, clearStoredSession, ensureSession } from "./auth-client.js";
+import { avatarSrcById, normalizeAvatarId } from "./shared-ui.js";
 import {
   initTmdb,
   fetchItemDetailsById,
@@ -8,7 +9,7 @@ import {
   seasonCount,
   titleById,
   posterById
-} from "./catalog.js?v=20260427c";
+} from "./catalog.js?v=20260430-search";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const settingsKey = "cinerune:settings";
@@ -31,8 +32,11 @@ function getProgressKey(session) {
 const el = {
   watchAccountMenuWrap: document.getElementById("watchAccountMenuWrap"),
   watchAccountBtn: document.getElementById("watchAccountBtn"),
+  watchAccountAvatar: document.getElementById("watchAccountAvatar"),
+  watchAccountLabel: document.getElementById("watchAccountLabel"),
   watchAccountMenu: document.getElementById("watchAccountMenu"),
   watchAccountSettings: document.getElementById("watchAccountSettings"),
+  watchSignOutBtn: document.getElementById("watchSignOutBtn"),
   watchListsLink: document.getElementById("watchListsLink"),
   watchTagline: document.getElementById("watchTagline"),
   watchTitle: document.getElementById("watchTitle"),
@@ -76,7 +80,10 @@ const state = {
   resumeMode: query.get("resume") === "1",
   resumeAttempted: false,
   resumeTarget: 0,
+  resumeSeekTimer: null,
   resumeFallbackTimer: null,
+  resumeSeekAttempts: 0,
+  resumeConfirmed: false,
   lastPlayerEventAt: 0,
   lastPlaybackTime: 0,
   settings: readJson(settingsKey, {
@@ -152,6 +159,16 @@ function bindEvents() {
     el.watchAccountSettings.addEventListener("click", () => {
       closeWatchAccountMenu();
         window.location.href = "./index.html?modal=settings";
+    });
+  }
+
+  if (el.watchSignOutBtn) {
+    el.watchSignOutBtn.addEventListener("click", () => {
+      clearStoredSession();
+      state.session = null;
+      syncProgressState();
+      closeWatchAccountMenu();
+      renderWatchAccountUI();
     });
   }
 
@@ -345,13 +362,21 @@ async function playNextEpisode() {
 }
 
 function loadPlayer() {
+  clearResumeTimers();
+  state.lastPlayerEventAt = 0;
+  state.lastPlaybackTime = 0;
+  state.resumeConfirmed = false;
+  state.resumeSeekAttempts = 0;
   el.playerFrame.src = "";
   const baseUrl = state.mediaType === "movie"
     ? `${PLAYER_BASE}/movie/${state.id}`
     : `${PLAYER_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
 
   const url = new URL(baseUrl);
-  if (state.settings.autoPlay || state.resumeMode) url.searchParams.set("autoPlay", "true");
+  if (state.settings.autoPlay || state.resumeMode) {
+    url.searchParams.set("autoPlay", "true");
+  }
+
   if (state.mediaType === "tv") {
     url.searchParams.set("nextEpisode", "true");
     url.searchParams.set("episodeSelector", "true");
@@ -368,7 +393,6 @@ function loadPlayer() {
     }
     const minRemaining = duration > 0 ? 30 : 0;
     if (safeTimestamp > 2 && (duration === 0 || safeTimestamp < duration - minRemaining)) {
-      url.searchParams.set("progress", String(safeTimestamp));
       appliedResume = true;
       state.resumeTarget = safeTimestamp;
     }
@@ -380,37 +404,65 @@ function loadPlayer() {
   }
 
   el.playerFrame.src = url.toString();
-  scheduleResumeFallback(appliedResume);
+  scheduleResumeSeek(appliedResume);
 
     // Do not show a transient "Player loaded" message to users.
 }
 
-function scheduleResumeFallback(appliedResume) {
+function clearResumeTimers() {
+  if (state.resumeSeekTimer) {
+    window.clearTimeout(state.resumeSeekTimer);
+    state.resumeSeekTimer = null;
+  }
   if (state.resumeFallbackTimer) {
     window.clearTimeout(state.resumeFallbackTimer);
     state.resumeFallbackTimer = null;
   }
+}
 
+function scheduleResumeSeek(appliedResume) {
   if (!state.resumeMode || !appliedResume) return;
 
   const startedAt = Date.now();
-  const initialPlayback = state.lastPlaybackTime;
-  const minProgress = Math.max(initialPlayback + 8, 8);
   const target = Number(state.resumeTarget || 0);
 
+  const attemptSeek = () => {
+    if (!state.resumeMode || !target) return;
+    if (state.resumeConfirmed) return;
+
+    state.resumeSeekAttempts += 1;
+    sendPlayerCommand("seek", { time: target });
+    sendPlayerCommand("play");
+
+    if (state.resumeSeekAttempts < 8) {
+      state.resumeSeekTimer = window.setTimeout(attemptSeek, 900);
+    }
+  };
+
+  state.resumeSeekTimer = window.setTimeout(attemptSeek, 1800);
   state.resumeFallbackTimer = window.setTimeout(() => {
     const noEvents = state.lastPlayerEventAt < startedAt;
-    const noProgress = state.lastPlaybackTime <= minProgress;
     const missedTarget = target > 0 && state.lastPlaybackTime < target - 6;
-    if (noEvents || noProgress || missedTarget) {
+    const stuckAtResumeFrame = state.resumeConfirmed && state.lastPlaybackTime < target + 4;
+    if (noEvents || missedTarget || stuckAtResumeFrame) {
       state.resumeMode = false;
       state.resumeAttempted = true;
       state.resumeTarget = 0;
+      state.resumeConfirmed = false;
       state.lastPlaybackTime = 0;
       state.lastPlayerEventAt = 0;
       loadPlayer();
     }
-  }, 12000);
+  }, 14000);
+}
+
+function sendPlayerCommand(command, payload = {}) {
+  const target = el.playerFrame?.contentWindow;
+  if (!target) return;
+
+  const message = { command, ...payload };
+  target.postMessage(message, "*");
+  target.postMessage({ type: "PLAYER_COMMAND", ...message }, "*");
 }
 
 
@@ -600,9 +652,15 @@ function onPlayerMessage(event) {
   }
 
   if (state.resumeTarget > 0 && state.lastPlaybackTime >= state.resumeTarget - 2) {
+    state.resumeConfirmed = true;
+  }
+
+  if (state.resumeTarget > 0 && state.lastPlaybackTime >= state.resumeTarget + 4) {
+    clearResumeTimers();
     state.resumeMode = false;
     state.resumeAttempted = true;
     state.resumeTarget = 0;
+    state.resumeConfirmed = false;
   }
 
   state.progress[key] = {
@@ -649,12 +707,21 @@ function renderWatchAccountUI() {
   if (!el.watchAccountBtn) return;
 
   if (state.session?.user) {
-    const username = state.session.user.user_metadata?.username || state.session.user.email || "Account";
-    el.watchAccountBtn.textContent = username;
+    const avatarId = normalizeAvatarId(state.session.user.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "ninja"));
+    if (el.watchAccountAvatar) {
+      el.watchAccountAvatar.src = avatarSrcById(avatarId);
+      el.watchAccountAvatar.alt = "Selected avatar";
+    }
+    if (el.watchAccountLabel) el.watchAccountLabel.textContent = "Account";
     el.watchAccountBtn.classList.add("active");
     if (el.watchListsLink) el.watchListsLink.removeAttribute("hidden");
   } else {
-    el.watchAccountBtn.textContent = "Login";
+    const avatarId = normalizeAvatarId(readJson("cinerune:avatar-choice", "ninja"));
+    if (el.watchAccountAvatar) {
+      el.watchAccountAvatar.src = avatarSrcById(avatarId);
+      el.watchAccountAvatar.alt = "Selected avatar";
+    }
+    if (el.watchAccountLabel) el.watchAccountLabel.textContent = "Login";
     el.watchAccountBtn.classList.remove("active");
     closeWatchAccountMenu();
     if (el.watchListsLink) el.watchListsLink.setAttribute("hidden", "");

@@ -9,8 +9,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link rel="icon" href="./favicon.svg?v=20260430" type="image/svg+xml" sizes="any">
-    <link rel="icon" href="./favicon-32.png?v=20260430" sizes="32x32" type="image/png">
-    <link rel="shortcut icon" href="./favicon.ico?v=20260430">
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="home-body">
@@ -18,6 +16,14 @@
 
     <header class="home-topbar">
       <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
+
+      <form id="navSearchForm" class="nav-search" action="./search.html" method="GET">
+        <button type="submit" id="navSearchBtn" class="nav-search-btn" aria-label="Search">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        </button>
+        <input type="search" id="navSearchInput" class="nav-search-input" name="q" placeholder="Search..." autocomplete="off" maxlength="80" />
+        <div id="searchSuggestions" class="search-suggestions nav-search-suggestions" hidden></div>
+      </form>
 
       <nav class="home-nav" aria-label="Main navigation">
         <a class="chip chip-link" href="./browse.html?mode=genre">Genre</a>
@@ -122,6 +128,33 @@
           <div class="account-actions">
             <button id="signOutBtn" class="pill-btn ghost" type="button">Sign Out</button>
           </div>
+
+          <div class="settings-section">
+            <h3>Account Details</h3>
+            <label>
+              <span>Username</span>
+              <input id="settingsUsername" type="text" placeholder="new username" maxlength="24" />
+            </label>
+            <div class="account-actions">
+              <button id="saveUsernameBtn" class="pill-btn" type="button">Save Username</button>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3>Password</h3>
+            <label>
+              <span>New Password</span>
+              <input id="settingsPassword" type="password" placeholder="new password" maxlength="128" />
+            </label>
+            <label>
+              <span>Confirm Password</span>
+              <input id="settingsPasswordConfirm" type="password" placeholder="re-enter new password" maxlength="128" />
+            </label>
+            <div class="account-actions">
+              <button id="savePasswordBtn" class="pill-btn" type="button">Update Password</button>
+            </div>
+          </div>
+
           <div class="avatar-picker-block compact">
             <div class="row-head compact">
               <h3>Change Avatar</h3>
@@ -149,16 +182,6 @@
           <h2>Continue Watching</h2>
         </div>
         <div id="continueGrid" class="poster-row"></div>
-      </section>
-
-      <section id="searchSection" class="home-row">
-        <div class="row-head">
-          <h2>Search</h2>
-        </div>
-        <div class="search-wrap search-wrap-wide">
-          <input id="searchInput" class="search-input" type="search" placeholder="Search movies or shows..." autocomplete="off" maxlength="80" />
-          <div id="searchSuggestions" class="search-suggestions" hidden></div>
-        </div>
       </section>
 
       <section id="searchResultsSection" class="home-row" hidden>
@@ -217,6 +240,6 @@
         document.head.appendChild(script);
       })();
     </script>
-    <script type="module" src="app.js?v=20260427f"></script>
+    <script type="module" src="app.js?v=20260430-search"></script>
   </body>
 </html>

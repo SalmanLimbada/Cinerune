@@ -13,6 +13,31 @@ const genreCache = {
 };
 let countryCache = null;
 
+const sensitiveExactTitles = new Set([
+  "overflow"
+]);
+
+const sensitiveTextTerms = [
+  "hentai",
+  "ecchi",
+  "erotic",
+  "softcore",
+  "porn",
+  "pornographic",
+  "xxx",
+  "sex",
+  "sexual",
+  "sexual content",
+  "explicit sexual",
+  "incest",
+  "step sister",
+  "stepsister",
+  "step brother",
+  "stepbrother",
+  "nude",
+  "nudity"
+];
+
 const fallbackMovieGenres = [
   { id: 28, name: "Action" },
   { id: 12, name: "Adventure" },
@@ -61,6 +86,10 @@ export function titleById(id, mediaType) {
 
 export function posterById(id, mediaType) {
   return getItemById(id, mediaType)?.poster || null;
+}
+
+export function isSensitiveCatalogItem(item) {
+  return isSensitiveItem(item);
 }
 
 export function seasonCount(tvId) {
@@ -388,8 +417,9 @@ export async function fetchGenreSections() {
 export async function searchCatalog(query, options = {}) {
   const text = String(query || "").trim();
   if (!text) return { all: [], movies: [], tv: [], page: 1, totalPages: 1 };
+  const sensitiveQuery = isSensitiveSearchQuery(text);
 
-  const requestedPages = Math.max(1, Math.min(5, Number(options.pages || 1)));
+  const requestedPages = Math.max(1, Math.min(20, Number(options.pages || 1)));
   const page = Math.max(1, Number(options.page || 1));
   const responses = await Promise.all(
     Array.from({ length: requestedPages }, (_unused, index) => {
@@ -402,8 +432,18 @@ export async function searchCatalog(query, options = {}) {
     })
   );
 
-  const normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [])))
+  let normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [], {
+    allowSensitiveExact: true,
+    query: text
+  })))
     .sort((a, b) => scoreSearchResult(b, text) - scoreSearchResult(a, text));
+
+  if (sensitiveQuery) {
+    normalized = isGenericSensitiveSearchQuery(text)
+      ? []
+      : normalized.filter((item) => isExactSensitiveSearch(item, text));
+  }
+
   cacheItems(normalized);
 
   const totalPages = Math.max(
@@ -463,10 +503,14 @@ export async function fetchItemsByIds(entries = []) {
   return items;
 }
 
-function normalizeList(results) {
+function normalizeList(results, options = {}) {
   return results
     .map((item) => normalizeItem(item))
-    .filter((item) => item && item.title && (item.poster || item.backdrop));
+    .filter((item) => {
+      if (!item || !item.title || (!item.poster && !item.backdrop)) return false;
+      if (!isSensitiveItem(item)) return true;
+      return Boolean(options.allowSensitiveExact && isExactSensitiveSearch(item, options.query));
+    });
 }
 
 function normalizeItem(item) {
@@ -513,6 +557,7 @@ function normalizeItem(item) {
     genreIds,
     runtime: runtimeMinutes > 0 ? `${runtimeMinutes} min` : "",
     plot: String(item.overview || "").trim(),
+    adult: Boolean(item.adult),
     rating: Number.isFinite(Number(item.vote_average)) && Number(item.vote_average) > 0
       ? Number(item.vote_average).toFixed(1)
       : "",
@@ -531,6 +576,39 @@ function normalizeItem(item) {
     defaultSeason: 1,
     defaultEpisode: 1
   };
+}
+
+function isSensitiveItem(item) {
+  if (item?.adult) return true;
+
+  const normalizedTitle = normalizeSearchText(item?.title);
+  if (sensitiveExactTitles.has(normalizedTitle)) return true;
+
+  const haystack = normalizeSearchText([
+    item?.title,
+    item?.plot,
+    item?.genre
+  ].filter(Boolean).join(" "));
+
+  return sensitiveTextTerms.some((term) => haystack.includes(normalizeSearchText(term)));
+}
+
+function isSensitiveSearchQuery(query) {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) return false;
+  if (sensitiveExactTitles.has(normalizedQuery)) return true;
+  return sensitiveTextTerms.some((term) => normalizedQuery.includes(normalizeSearchText(term)));
+}
+
+function isGenericSensitiveSearchQuery(query) {
+  const normalizedQuery = normalizeSearchText(query);
+  return sensitiveTextTerms.some((term) => normalizedQuery === normalizeSearchText(term));
+}
+
+function isExactSensitiveSearch(item, query) {
+  const normalizedQuery = normalizeSearchText(query);
+  const normalizedTitle = normalizeSearchText(item?.title);
+  return normalizedQuery && normalizedQuery === normalizedTitle;
 }
 
 function cacheItems(items) {

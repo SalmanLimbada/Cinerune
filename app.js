@@ -1,5 +1,5 @@
 import { apiRequest, authHeaders, ensureSession, setStoredSession, clearStoredSession } from "./auth-client.js";
-import * as catalogApi from "./catalog.js?v=20260427c";
+import * as catalogApi from "./catalog.js?v=20260430-search";
 
 const initTmdb = catalogApi.initTmdb;
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
@@ -11,6 +11,7 @@ const posterById = catalogApi.posterById;
 const fetchItemsByIds = catalogApi.fetchItemsByIds;
 const fetchRecommendedFromHistory = catalogApi.fetchRecommendedFromHistory || (async () => []);
 const fetchItemDetailsById = catalogApi.fetchItemDetailsById;
+const isSensitiveCatalogItem = catalogApi.isSensitiveCatalogItem || (() => false);
 
 const legacyProgressKey = "cinerune:progress";
 const progressBaseKey = "cinerune:progress";
@@ -23,12 +24,18 @@ const INPUT_LIMITS = {
   searchMax: 80
 };
 const avatarOptions = [
-  { id: "orbit", label: "Orbit", bg1: "#7ad8ff", bg2: "#1d4263", skin: "#f0c7a5", hair: "#1f2431", shirt: "#5ec7ff", eyes: "#172232", accent: "#d9f4ff", hairStyle: "short", accessory: "none" },
-  { id: "ember", label: "Ember", bg1: "#ffb28c", bg2: "#5b2433", skin: "#d7a07f", hair: "#6e2e1f", shirt: "#ff8d6e", eyes: "#2c1b1b", accent: "#ffd4c8", hairStyle: "wave", accessory: "earring" },
-  { id: "mint", label: "Mint", bg1: "#96f0cf", bg2: "#214f56", skin: "#f3d2bb", hair: "#275b52", shirt: "#7ce2c7", eyes: "#183137", accent: "#e5fff8", hairStyle: "bob", accessory: "none" },
-  { id: "sun", label: "Sun", bg1: "#ffd86a", bg2: "#6a4c21", skin: "#c98d63", hair: "#6d4b1d", shirt: "#f7bf54", eyes: "#2a1a0f", accent: "#fff0b8", hairStyle: "curl", accessory: "glasses" },
-  { id: "violet", label: "Violet", bg1: "#c8a7ff", bg2: "#37235d", skin: "#ecc1aa", hair: "#4b2b7f", shirt: "#9d79ff", eyes: "#21162f", accent: "#efe4ff", hairStyle: "long", accessory: "none" },
-  { id: "rose", label: "Rose", bg1: "#ff9ed4", bg2: "#632b55", skin: "#f1cfb6", hair: "#8f3564", shirt: "#ff82c0", eyes: "#2d1830", accent: "#ffe0f0", hairStyle: "bun", accessory: "star" }
+  { id: "ninja", label: "Ninja Boy", bg1: "#ff9900", bg2: "#d32f2f", skin: "#ffdfbd", hair: "#ffdd00", shirt: "#ff6600", eyes: "#3b5998", accent: "#003366", hairStyle: "spiky", accessory: "headband" },
+  { id: "pirate", label: "Pirate King", bg1: "#4dabf7", bg2: "#1864ab", skin: "#f1c27d", hair: "#111111", shirt: "#e03131", eyes: "#111111", accent: "#f5c518", hairStyle: "short", accessory: "strawhat" },
+  { id: "wizard", label: "Chosen Wizard", bg1: "#660000", bg2: "#220000", skin: "#ffe0c2", hair: "#2c1b18", shirt: "#333333", eyes: "#296d39", accent: "#ffd700", hairStyle: "short", accessory: "glasses_scar" },
+  { id: "spider", label: "Web Slinger", bg1: "#e03131", bg2: "#0b7285", skin: "#f3d2bb", hair: "#4d331f", shirt: "#c92a2a", eyes: "#5c3a21", accent: "#1864ab", hairStyle: "short", accessory: "none" },
+  { id: "jinx", label: "Chaos Girl", bg1: "#c8a7ff", bg2: "#862e9c", skin: "#fdf0f5", hair: "#22b8cf", shirt: "#212529", eyes: "#e64980", accent: "#333", hairStyle: "long", accessory: "none" },
+  { id: "wednesday", label: "Goth Girl", bg1: "#495057", bg2: "#212529", skin: "#f8f9fa", hair: "#111", shirt: "#111", eyes: "#111", accent: "#fff", hairStyle: "long", accessory: "none" },
+  { id: "chemist", label: "The Chemist", bg1: "#b2f2bb", bg2: "#08b361", skin: "#ffdfbd", hair: "#111", shirt: "#2f9e44", eyes: "#111", accent: "#a67c52", hairStyle: "bald", accessory: "glasses_goatee" },
+  { id: "sailor", label: "Moon Princess", bg1: "#ffb8cb", bg2: "#c2255c", skin: "#ffe3e3", hair: "#ffd43b", shirt: "#f8f9fa", eyes: "#1c7ed6", accent: "#fcc419", hairStyle: "bun", accessory: "star" },
+  { id: "sorcerer", label: "Blindfold Sorcerer", bg1: "#3b5bdb", bg2: "#1864ab", skin: "#f8f9fa", hair: "#e9ecef", shirt: "#111", eyes: "#666", accent: "#111", hairStyle: "spiky", accessory: "blindfold" },
+  { id: "slayer", label: "Demon Hunter", bg1: "#b2f2bb", bg2: "#2b8a3e", skin: "#f1c27d", hair: "#8b0000", shirt: "#2b8a3e", eyes: "#8b0000", accent: "#f1c27d", hairStyle: "spiky", accessory: "earring" },
+  { id: "spy", label: "Telepath Girl", bg1: "#ffc9c9", bg2: "#e64980", skin: "#ffe3e3", hair: "#ffb8cb", shirt: "#212529", eyes: "#2b8a3e", accent: "#111", hairStyle: "bob", accessory: "none" },
+  { id: "saiyan", label: "Super Warrior", bg1: "#ffec99", bg2: "#e8590c", skin: "#f1c27d", hair: "#111", shirt: "#f08c00", eyes: "#111", accent: "#111", hairStyle: "spiky", accessory: "none" }
 ];
 
 const el = {
@@ -53,6 +60,11 @@ const el = {
   signedOutView: document.getElementById("signedOutView"),
   signedInView: document.getElementById("signedInView"),
   signedInHint: document.getElementById("signedInHint"),
+  settingsUsername: document.getElementById("settingsUsername"),
+  settingsPassword: document.getElementById("settingsPassword"),
+  settingsPasswordConfirm: document.getElementById("settingsPasswordConfirm"),
+  saveUsernameBtn: document.getElementById("saveUsernameBtn"),
+  savePasswordBtn: document.getElementById("savePasswordBtn"),
   authIdentifier: document.getElementById("authIdentifier"),
   authPassword: document.getElementById("authPassword"),
   signupUsername: document.getElementById("signupUsername"),
@@ -85,7 +97,6 @@ const el = {
   recommendedGrid: document.getElementById("recommendedGrid"),
   trendingGrid: document.getElementById("trendingGrid"),
   popularGrid: document.getElementById("popularGrid"),
-  searchInput: document.getElementById("searchInput"),
   searchSuggestions: document.getElementById("searchSuggestions"),
   navSearchBtn: document.getElementById("navSearchBtn"),
   navSearchInput: document.getElementById("navSearchInput"),
@@ -129,7 +140,7 @@ function getProgressKey(session) {
   return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
 }
 
-let selectedAvatarId = readJson("cinerune:avatar-choice", "orbit");
+let selectedAvatarId = readJson("cinerune:avatar-choice", "ninja");
 let authModalMode = "login";
 const startupQuery = new URLSearchParams(window.location.search);
 const startupAuthMode = startupQuery.get("auth") || startupQuery.get("modal");
@@ -197,6 +208,8 @@ function bindEvents() {
   if (el.signUpBtn) el.signUpBtn.addEventListener("click", signUp);
   if (el.signOutBtn) el.signOutBtn.addEventListener("click", signOut);
   if (el.signOutMenuBtn) el.signOutMenuBtn.addEventListener("click", signOut);
+  if (el.saveUsernameBtn) el.saveUsernameBtn.addEventListener("click", saveUsername);
+  if (el.savePasswordBtn) el.savePasswordBtn.addEventListener("click", savePassword);
   if (el.loginTabBtn) el.loginTabBtn.addEventListener("click", () => openAuthModal("login"));
   if (el.signupTabBtn) el.signupTabBtn.addEventListener("click", () => openAuthModal("signup"));
 
@@ -234,11 +247,11 @@ function bindEvents() {
     });
   }
 
-  if (el.searchInput) {
-    el.searchInput.addEventListener("input", debounce(async () => {
-      state.searchTerm = sanitizeText(el.searchInput.value, INPUT_LIMITS.searchMax);
-      if (el.searchInput.value !== state.searchTerm) {
-        el.searchInput.value = state.searchTerm;
+  if (el.navSearchInput) {
+    el.navSearchInput.addEventListener("input", debounce(async () => {
+      state.searchTerm = sanitizeText(el.navSearchInput.value, INPUT_LIMITS.searchMax);
+      if (el.navSearchInput.value !== state.searchTerm) {
+        el.navSearchInput.value = state.searchTerm;
       }
       if (!state.searchTerm) {
         state.searchResults = [];
@@ -262,29 +275,11 @@ function bindEvents() {
       }
     }, 280));
 
-    el.searchInput.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      if (!state.searchTerm) return;
-      openSearchPage(state.searchTerm);
-    });
-  }
-
-  if (el.navSearchBtn && el.navSearchInput) {
-    el.navSearchBtn.addEventListener("click", () => {
-      if (el.navSearchInput.hasAttribute("hidden")) {
-        el.navSearchInput.removeAttribute("hidden");
-        el.navSearchInput.focus();
-      } else if (el.navSearchInput.value.trim()) {
-        el.navSearchForm?.submit();
-      } else {
-        el.navSearchInput.setAttribute("hidden", "");
-      }
-    });
     el.navSearchInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        if (el.navSearchInput.value.trim()) el.navSearchForm?.submit();
+        const term = sanitizeText(el.navSearchInput.value, INPUT_LIMITS.searchMax);
+        if (term) openSearchPage(term);
       }
     });
   }
@@ -296,11 +291,8 @@ function bindEvents() {
     if (el.notificationsWrap && !el.notificationsWrap.contains(event.target)) {
       closeNotificationsMenu();
     }
-    if (el.navSearchForm && !el.navSearchForm.contains(event.target)) {
-      el.navSearchInput?.setAttribute("hidden", "");
-    }
-    if (!el.searchInput || !el.searchSuggestions) return;
-    if (event.target === el.searchInput || el.searchSuggestions.contains(event.target)) return;
+    if (!el.navSearchInput || !el.searchSuggestions) return;
+    if (event.target === el.navSearchInput || el.searchSuggestions.contains(event.target)) return;
     hideSearchSuggestions();
   });
 
@@ -504,7 +496,13 @@ async function hydrateContinueRow() {
         ? `S${entry.season || 1} E${entry.episode || 1} • ${formatSeconds(entry.timestamp)}`
         : `${Math.round(Number(entry.progress || 0))}% • ${formatSeconds(entry.timestamp)}`
     };
-  });
+  }).filter((item) => !isSensitiveCatalogItem(item));
+
+  if (!items.length) {
+    el.continueSection.setAttribute("hidden", "");
+    el.continueGrid.innerHTML = "";
+    return;
+  }
 
   el.continueSection.removeAttribute("hidden");
   renderPosterCards(el.continueGrid, items, {
@@ -776,17 +774,11 @@ function updateContinueWatchingLink(entry) {
   if (!el.continueWatchingLink) return;
 
   if (!entry?.id) {
-    el.continueWatchingLink.href = "./index.html#continueSection";
+    el.continueWatchingLink.href = "./lists.html?view=continue";
     return;
   }
 
-  el.continueWatchingLink.href = buildWatchHref(
-    entry.id,
-    entry.mediaType,
-    entry.season || 1,
-    entry.episode || 1,
-    true
-  );
+  el.continueWatchingLink.href = "./lists.html?view=continue";
 }
 
 function buildWatchHref(id, mediaType, season, episode, resume = false) {
@@ -889,6 +881,9 @@ function renderAuthUI() {
       setAuthHint("");
     }
     el.signedInHint.textContent = "You are signed in.";
+    if (el.settingsUsername) {
+      el.settingsUsername.value = user.user_metadata?.username || "";
+    }
   } else {
     const avatarId = normalizeAvatarId(selectedAvatarId);
     renderActiveAvatar(avatarId);
@@ -896,6 +891,9 @@ function renderAuthUI() {
     closeAccountMenu();
     el.homeListsLink?.setAttribute("hidden", "");
     if (el.toggleAuth) el.toggleAuth.title = "Sign in";
+    if (el.settingsUsername) el.settingsUsername.value = "";
+    if (el.settingsPassword) el.settingsPassword.value = "";
+    if (el.settingsPasswordConfirm) el.settingsPasswordConfirm.value = "";
     setAuthHint("");
   }
 
@@ -991,6 +989,103 @@ async function signOut() {
   setAuthHint("Signed out.");
 }
 
+async function saveUsername() {
+  if (!state.session?.user) {
+    setAuthHint("Sign in first.");
+    return;
+  }
+
+  const username = normalizeUsername(el.settingsUsername?.value);
+  if (!username) {
+    setAuthHint("Provide a username with 3-24 letters, numbers, dots, underscores, or dashes.");
+    return;
+  }
+
+  try {
+    const session = await ensureSession();
+    if (!session) {
+      setAuthHint("Sign in again to update your username.");
+      return;
+    }
+    const updated = await apiRequest("/auth/update", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: {
+        username,
+        avatarId: normalizeAvatarId(state.session.user.user_metadata?.avatarId || selectedAvatarId)
+      }
+    });
+    applyUpdatedUser(updated?.user || updated, { username });
+    setAuthHint("Username updated.");
+  } catch (error) {
+    setAuthHint(`Update failed: ${error.message}`);
+  }
+}
+
+async function savePassword() {
+  if (!state.session?.user) {
+    setAuthHint("Sign in first.");
+    return;
+  }
+
+  const password = String(el.settingsPassword?.value || "");
+  const confirm = String(el.settingsPasswordConfirm?.value || "");
+  if (!isValidPassword(password)) {
+    setAuthHint("Provide a password with 6-128 characters.");
+    return;
+  }
+  if (password !== confirm) {
+    setAuthHint("Passwords do not match.");
+    return;
+  }
+
+  try {
+    const session = await ensureSession();
+    if (!session) {
+      setAuthHint("Sign in again to update your password.");
+      return;
+    }
+    const updated = await apiRequest("/auth/update", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: { password }
+    });
+    applyUpdatedUser(updated?.user || updated);
+    if (el.settingsPassword) el.settingsPassword.value = "";
+    if (el.settingsPasswordConfirm) el.settingsPasswordConfirm.value = "";
+    setAuthHint("Password updated.");
+  } catch (error) {
+    setAuthHint(`Update failed: ${error.message}`);
+  }
+}
+
+function applyUpdatedUser(user, metadataPatch = {}) {
+  if (!state.session?.user) return;
+  const nextUser = user?.id
+    ? user
+    : {
+        ...state.session.user,
+        user_metadata: {
+          ...(state.session.user.user_metadata || {}),
+          ...metadataPatch
+        }
+      };
+  state.session = {
+    ...state.session,
+    user: {
+      ...state.session.user,
+      ...nextUser,
+      user_metadata: {
+        ...(state.session.user.user_metadata || {}),
+        ...(nextUser.user_metadata || {}),
+        ...metadataPatch
+      }
+    }
+  };
+  setStoredSession(state.session);
+  renderAuthUI();
+}
+
 function onAuthEnter(event) {
   if (event.key !== "Enter") return;
   event.preventDefault();
@@ -1026,7 +1121,7 @@ function isValidPassword(value) {
 }
 
 function normalizeAvatarId(value) {
-  const fallback = avatarOptions[0]?.id || "orbit";
+  const fallback = avatarOptions[0]?.id || "ninja";
   return avatarOptions.some((option) => option.id === value) ? value : fallback;
 }
 
@@ -1094,7 +1189,7 @@ function avatarDataUri(avatar) {
           <stop offset="100%" stop-color="${safeBg2}" />
         </linearGradient>
       </defs>
-      
+
       <!-- Background Base -->
       <rect width="128" height="128" rx="32" fill="url(#bg-${avatar.id})" />
 
@@ -1268,11 +1363,15 @@ async function persistAvatarChoice(avatarId) {
   try {
     const session = await ensureSession();
     if (!session) return;
-    await apiRequest("/auth/update", {
+    const updated = await apiRequest("/auth/update", {
       method: "POST",
       headers: authHeaders(session),
-      body: { avatarId: normalized }
+      body: {
+        avatarId: normalized,
+        username: state.session.user.user_metadata?.username || undefined
+      }
     });
+    applyUpdatedUser(updated?.user || updated, { avatarId: normalized });
   } catch {
     // ignore avatar sync errors
   }

@@ -2,11 +2,16 @@ import {
   initTmdb,
   fetchItemsByIds,
   titleById,
-  posterById
-} from "./catalog.js?v=20260427c";
+  posterById,
+  isSensitiveCatalogItem
+} from "./catalog.js?v=20260430-search";
 import { ensureSession } from "./auth-client.js";
+import { initSharedHeader } from "./shared-ui.js";
 
 const bookmarksBaseKey = "cinerune:bookmarks";
+const progressBaseKey = "cinerune:progress";
+const legacyProgressKey = "cinerune:progress";
+const query = new URLSearchParams(window.location.search);
 
 function getBookmarksKey(session) {
   const userId = session?.user?.id ? String(session.user.id) : "";
@@ -15,6 +20,9 @@ function getBookmarksKey(session) {
 
 const el = {
   listsStatus: document.getElementById("listsStatus"),
+  listsTitle: document.getElementById("listsTitle"),
+  continueListSection: document.getElementById("continueListSection"),
+  listContinue: document.getElementById("listContinue"),
   listWatching: document.getElementById("listWatching"),
   listWatched: document.getElementById("listWatched"),
   listPlan: document.getElementById("listPlan"),
@@ -29,6 +37,7 @@ const state = {
 boot();
 
 async function boot() {
+  initSharedHeader();
   initTmdb({
     apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
@@ -36,6 +45,11 @@ async function boot() {
 
 
   await initAuth();
+
+  if (query.get("view") === "continue") {
+    await renderContinuePage();
+    return;
+  }
 
   const bookmarks = Object.values(readJson(getBookmarksKey(state.session), {}))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
@@ -49,7 +63,7 @@ async function boot() {
     return;
   }
 
-  const hydrated = await hydrateBookmarks(bookmarks);
+  const hydrated = (await hydrateBookmarks(bookmarks)).filter((item) => !isSensitiveCatalogItem(item));
 
   renderList(el.listWatching, hydrated.filter((item) => item.status === "watching"));
   renderList(el.listWatched, hydrated.filter((item) => item.status === "watched"));
@@ -57,6 +71,26 @@ async function boot() {
   renderList(el.listDropped, hydrated.filter((item) => item.status === "dropped"));
 
   el.listsStatus.textContent = `${hydrated.length} saved title${hydrated.length === 1 ? "" : "s"}.`;
+}
+
+async function renderContinuePage() {
+  if (el.listsTitle) el.listsTitle.textContent = "Continue Watching";
+  hideBookmarkSections();
+
+  const progress = readJson(getProgressKey(state.session), readJson(legacyProgressKey, {}));
+  const entries = dedupeContinueEntries(Object.values(progress || {})
+    .filter((entry) => Number(entry.timestamp || 0) > 20 && Number(entry.progress || 0) < 98));
+
+  if (!entries.length) {
+    el.listsStatus.textContent = "No continue watching titles yet.";
+    renderEmpty(el.listContinue);
+    return;
+  }
+
+  const hydrated = (await hydrateProgressEntries(entries)).filter((item) => !isSensitiveCatalogItem(item));
+  el.continueListSection?.removeAttribute("hidden");
+  renderList(el.listContinue, hydrated, { resume: true });
+  el.listsStatus.textContent = `${hydrated.length} title${hydrated.length === 1 ? "" : "s"} in progress.`;
 }
 
 async function initAuth() {
@@ -95,7 +129,38 @@ async function hydrateBookmarks(bookmarks) {
   }
 }
 
-function renderList(container, entries) {
+async function hydrateProgressEntries(entries) {
+  const fallback = entries.map((entry) => ({
+    id: Number(entry.id),
+    mediaType: entry.mediaType === "tv" ? "tv" : "movie",
+    season: Number(entry.season || 1),
+    episode: Number(entry.episode || 1),
+    title: entry.title || titleById(entry.id, entry.mediaType) || `Title ${entry.id}`,
+    poster: entry.poster || posterById(entry.id, entry.mediaType) || "",
+    year: "",
+    progressMeta: entry.mediaType === "tv"
+      ? `S${entry.season || 1} E${entry.episode || 1} | ${formatSeconds(entry.timestamp)}`
+      : `${Math.round(Number(entry.progress || 0))}% | ${formatSeconds(entry.timestamp)}`
+  }));
+
+  try {
+    const apiItems = await fetchItemsByIds(fallback);
+    const byKey = new Map(apiItems.map((item) => [`${item.mediaType}:${item.id}`, item]));
+    return fallback.map((entry) => {
+      const apiItem = byKey.get(`${entry.mediaType}:${entry.id}`);
+      return {
+        ...entry,
+        title: apiItem?.title || entry.title,
+        poster: apiItem?.poster || entry.poster,
+        year: apiItem?.year || ""
+      };
+    });
+  } catch {
+    return fallback;
+  }
+}
+
+function renderList(container, entries, options = {}) {
   if (!entries.length) {
     renderEmpty(container);
     return;
@@ -114,10 +179,10 @@ function renderList(container, entries) {
     image.src = item.poster || buildPosterPlaceholder(item.title);
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
-    sub.textContent = [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
+    sub.textContent = item.progressMeta || [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
 
     button.addEventListener("click", () => {
-      openWatchPage(item.id, item.mediaType);
+      openWatchPage(item.id, item.mediaType, item.season, item.episode, options.resume);
     });
 
     fragment.appendChild(node);
@@ -152,15 +217,50 @@ function renderEmpty(container) {
   container.innerHTML = '<p class="tiny muted">Empty</p>';
 }
 
-function openWatchPage(id, mediaType) {
+function openWatchPage(id, mediaType, season = 1, episode = 1, resume = false) {
   const url = new URL("./watch.html", window.location.href);
   url.searchParams.set("id", String(id));
   url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
   if (mediaType === "tv") {
-    url.searchParams.set("s", "1");
-    url.searchParams.set("e", "1");
+    url.searchParams.set("s", String(season || 1));
+    url.searchParams.set("e", String(episode || 1));
+  }
+  if (resume) {
+    url.searchParams.set("resume", "1");
   }
   window.location.href = url.toString();
+}
+
+function hideBookmarkSections() {
+  [el.listWatching, el.listWatched, el.listPlan, el.listDropped].forEach((node) => {
+    node?.closest(".lists-section")?.setAttribute("hidden", "");
+  });
+}
+
+function dedupeContinueEntries(entries) {
+  const map = new Map();
+  entries.forEach((entry) => {
+    const key = `${entry.mediaType === "tv" ? "tv" : "movie"}:${Number(entry.id || 0)}`;
+    const previous = map.get(key);
+    if (!previous || Number(entry.updatedAt || 0) > Number(previous.updatedAt || 0)) {
+      map.set(key, entry);
+    }
+  });
+  return [...map.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+}
+
+function getProgressKey(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
+}
+
+function formatSeconds(value) {
+  const total = Math.max(0, Math.floor(Number(value || 0)));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function readJson(key, fallback) {

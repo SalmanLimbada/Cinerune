@@ -9,8 +9,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link rel="icon" href="./favicon.svg?v=20260430" type="image/svg+xml" sizes="any">
-    <link rel="icon" href="./favicon-32.png?v=20260430" sizes="32x32" type="image/png">
-    <link rel="shortcut icon" href="./favicon.ico?v=20260430">
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="home-body">
@@ -18,13 +16,30 @@
 
     <header class="home-topbar">
       <a class="home-logo" href="./index.html" aria-label="Go to home"><span>CINE</span>RUNE</a>
+      <form class="nav-search" action="./search.html" method="GET">
+        <button type="submit" class="nav-search-btn" aria-label="Search">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        </button>
+        <input type="search" class="nav-search-input" name="q" placeholder="Search..." autocomplete="off" maxlength="80" />
+      </form>
       <nav class="home-nav" aria-label="Search navigation">
         <a href="./index.html">Home</a>
         <a href="./index.html?menu=genre">Genres</a>
         <a href="./index.html?menu=country">Countries</a>
         <a href="./top-rated.html?type=movie">Top Rated</a>
       </nav>
-      <a class="pill-btn" href="./index.html">Back</a>
+      <div id="accountMenuWrap" class="account-menu-wrap">
+        <button id="toggleAuth" class="pill-btn account-pill" type="button">
+          <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" />
+          <span id="authButtonLabel">Login</span>
+        </button>
+        <div id="accountMenu" class="account-menu" hidden>
+          <a class="account-menu-item" href="./index.html?modal=settings">Settings</a>
+          <a class="account-menu-item" href="./lists.html">My Lists</a>
+          <a class="account-menu-item" href="./lists.html?view=continue">Continue Watching</a>
+          <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">Sign Out</button>
+        </div>
+      </div>
     </header>
 
     <main class="home-shell">
@@ -43,6 +58,7 @@
           <h3>Results</h3>
         </div>
         <div id="searchPageGrid" class="poster-grid"></div>
+        <div id="searchPagePagination" class="pager"></div>
       </section>
     </main>
 
@@ -72,6 +88,6 @@
         document.head.appendChild(script);
       })();
     </script>
-    <script type="module" src="search.js?v=20260427f"></script>
+    <script type="module" src="search.js?v=20260430-search"></script>
   </body>
 </html>
