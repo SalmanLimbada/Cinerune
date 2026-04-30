@@ -4,7 +4,6 @@
 // 3) Do not commit config.local.js
 window.CINERUNE_CONFIG = {
   ...window.CINERUNE_CONFIG,
-  tmdbApiKey: "YOUR_LOCAL_TMDB_API_KEY",
-  tmdbReadAccessToken: "YOUR_LOCAL_TMDB_READ_ACCESS_TOKEN",
+  apiBase: "http://127.0.0.1:8787",
   tmdbLanguage: "en-US"
 };

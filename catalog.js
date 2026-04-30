@@ -1,7 +1,8 @@
 let tmdbConfig = {
   apiKey: "",
   readAccessToken: "",
-  language: "en-US"
+  language: "en-US",
+  apiBase: ""
 };
 
 const itemCache = new Map();
@@ -44,7 +45,8 @@ export function initTmdb(config = {}) {
   tmdbConfig = {
     apiKey: String(config.apiKey || "").trim(),
     readAccessToken: String(config.readAccessToken || "").trim(),
-    language: String(config.language || "en-US").trim() || "en-US"
+    language: String(config.language || "en-US").trim() || "en-US",
+    apiBase: String(config.apiBase || "").trim()
   };
 }
 
@@ -540,13 +542,17 @@ function cacheItems(items) {
 }
 
 async function tmdbRequest(path, params = {}) {
-  if (!tmdbConfig.apiKey && !tmdbConfig.readAccessToken) {
+  const hasProxy = Boolean(tmdbConfig.apiBase);
+  if (!hasProxy && !tmdbConfig.apiKey && !tmdbConfig.readAccessToken) {
     throw new Error("TMDB config missing");
   }
 
-  const url = new URL(`https://api.themoviedb.org/3${path}`);
+  const base = hasProxy
+    ? tmdbConfig.apiBase.replace(/\/+$/, "")
+    : "https://api.themoviedb.org/3";
+  const url = new URL(`${base}${hasProxy ? "/api/tmdb" : ""}${path}`);
   url.searchParams.set("language", tmdbConfig.language);
-  if (tmdbConfig.apiKey) {
+  if (!hasProxy && tmdbConfig.apiKey) {
     url.searchParams.set("api_key", tmdbConfig.apiKey);
   }
 
@@ -557,7 +563,7 @@ async function tmdbRequest(path, params = {}) {
   });
 
   const headers = { Accept: "application/json" };
-  if (tmdbConfig.readAccessToken) {
+  if (!hasProxy && tmdbConfig.readAccessToken) {
     headers.Authorization = `Bearer ${tmdbConfig.readAccessToken}`;
   }
 

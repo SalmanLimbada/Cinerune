@@ -75,11 +75,11 @@
             <h2 id="authTitle">Sign In</h2>
             <label>
               <span>Username or Email</span>
-              <input id="authIdentifier" type="text" placeholder="username or email" />
+              <input id="authIdentifier" type="text" placeholder="username or email" maxlength="80" />
             </label>
             <label>
               <span>Password</span>
-              <input id="authPassword" type="password" placeholder="your password" />
+              <input id="authPassword" type="password" placeholder="your password" maxlength="128" />
             </label>
             <div class="account-actions">
               <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
@@ -90,15 +90,15 @@
             <h2>Create Account</h2>
             <label>
               <span>Username</span>
-              <input id="signupUsername" type="text" placeholder="pick a username" />
+              <input id="signupUsername" type="text" placeholder="pick a username" maxlength="24" />
             </label>
             <label>
               <span>Password</span>
-              <input id="signupPassword" type="password" placeholder="create a password" />
+              <input id="signupPassword" type="password" placeholder="create a password" maxlength="128" />
             </label>
             <label>
               <span>Confirm Password</span>
-              <input id="signupConfirm" type="password" placeholder="re-enter your password" />
+              <input id="signupConfirm" type="password" placeholder="re-enter your password" maxlength="128" />
             </label>
             <div class="account-actions">
               <button id="signUpBtn" class="pill-btn" type="button">Create Account</button>
@@ -154,7 +154,7 @@
           <h2>Search</h2>
         </div>
         <div class="search-wrap search-wrap-wide">
-          <input id="searchInput" class="search-input" type="search" placeholder="Search movies or shows..." autocomplete="off" />
+          <input id="searchInput" class="search-input" type="search" placeholder="Search movies or shows..." autocomplete="off" maxlength="80" />
           <div id="searchSuggestions" class="search-suggestions" hidden></div>
         </div>
       </section>

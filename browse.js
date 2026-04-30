@@ -7,9 +7,10 @@ import {
 } from "./catalog.js?v=20260427c";
 
 const query = new URLSearchParams(window.location.search);
+const INPUT_LIMITS = { valueMax: 12, nameMax: 40 };
 const mode = query.get("mode") === "country" ? "country" : "genre";
-const value = String(query.get("value") || "").trim();
-const name = String(query.get("name") || "").trim();
+const value = sanitizeText(query.get("value"), INPUT_LIMITS.valueMax);
+const name = sanitizeText(query.get("name"), INPUT_LIMITS.nameMax);
 const page = Math.max(1, Number(query.get("page") || 1));
 
 const el = {
@@ -29,8 +30,7 @@ boot();
 
 async function boot() {
   initTmdb({
-    apiKey: String(window.CINERUNE_CONFIG?.tmdbApiKey || "").trim(),
-    readAccessToken: String(window.CINERUNE_CONFIG?.tmdbReadAccessToken || "").trim(),
+    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 
@@ -145,6 +145,12 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function sanitizeText(value, maxLen) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return trimmed.slice(0, maxLen);
 }
 
 function renderPosterCards(container, items) {

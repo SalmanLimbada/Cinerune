@@ -1,4 +1,4 @@
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { apiRequest, authHeaders, ensureSession, setStoredSession, clearStoredSession } from "./auth-client.js";
 import * as catalogApi from "./catalog.js?v=20260427c";
 
 const initTmdb = catalogApi.initTmdb;
@@ -16,6 +16,12 @@ const legacyProgressKey = "cinerune:progress";
 const progressBaseKey = "cinerune:progress";
 const bookmarksBaseKey = "cinerune:bookmarks";
 const homeCacheKey = "cinerune:home-cache";
+const INPUT_LIMITS = {
+  identifierMax: 80,
+  usernameMax: 24,
+  passwordMax: 128,
+  searchMax: 80
+};
 const avatarOptions = [
   { id: "orbit", label: "Orbit", bg1: "#7ad8ff", bg2: "#1d4263", skin: "#f0c7a5", hair: "#1f2431", shirt: "#5ec7ff", eyes: "#172232", accent: "#d9f4ff", hairStyle: "short", accessory: "none" },
   { id: "ember", label: "Ember", bg1: "#ffb28c", bg2: "#5b2433", skin: "#d7a07f", hair: "#6e2e1f", shirt: "#ff8d6e", eyes: "#2c1b1b", accent: "#ffd4c8", hairStyle: "wave", accessory: "earring" },
@@ -90,9 +96,7 @@ const el = {
 const state = {
   progress: {},
   bookmarks: readJson(getBookmarksKey(null), {}),
-  supabase: null,
   session: null,
-  cloudEnabled: false,
   homeData: {
     hero: null,
     recommended: [],
@@ -135,8 +139,7 @@ async function boot() {
   syncProgressState();
 
   initTmdb({
-    apiKey: String(window.CINERUNE_CONFIG?.tmdbApiKey || "").trim(),
-    readAccessToken: String(window.CINERUNE_CONFIG?.tmdbReadAccessToken || "").trim(),
+    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 
@@ -230,7 +233,10 @@ function bindEvents() {
 
   if (el.searchInput) {
     el.searchInput.addEventListener("input", debounce(async () => {
-      state.searchTerm = el.searchInput.value.trim();
+      state.searchTerm = sanitizeText(el.searchInput.value, INPUT_LIMITS.searchMax);
+      if (el.searchInput.value !== state.searchTerm) {
+        el.searchInput.value = state.searchTerm;
+      }
       if (!state.searchTerm) {
         state.searchResults = [];
         hideSearchSuggestions();
@@ -730,7 +736,7 @@ function closeNotificationsMenu() {
 }
 
 function openSearchPage(term) {
-  const text = String(term || "").trim();
+  const text = sanitizeText(term, INPUT_LIMITS.searchMax);
   if (!text) return;
   const url = new URL("./search.html", window.location.href);
   url.searchParams.set("q", text);
@@ -792,53 +798,22 @@ function syncProgressState() {
 }
 
 async function initAuth() {
-  const config = window.CINERUNE_CONFIG || {};
-  const supabaseUrl = String(config.supabaseUrl || "").trim();
-  const supabasePublishableKey = String(config.supabasePublishableKey || config.supabaseAnonKey || "").trim();
-
-  if (!supabaseUrl || !supabasePublishableKey) {
-    setAuthHint("Sign in is currently unavailable.");
-    renderAuthUI();
-    return;
-  }
-
   try {
-    state.supabase = createClient(supabaseUrl, supabasePublishableKey, {
-      auth: { persistSession: true, autoRefreshToken: true }
-    });
-
-    const { data } = await state.supabase.auth.getSession();
-    state.session = data?.session || null;
+    const session = await ensureSession();
+    state.session = session;
     syncProgressState();
     syncBookmarksState();
-    state.cloudEnabled = true;
-
-    state.supabase.auth.onAuthStateChange((_event, session) => {
-      state.session = session;
-      syncProgressState();
-      syncBookmarksState();
-      renderAuthUI();
-      if (session?.user) {
-        const accountAvatarId = normalizeAvatarId(session.user.user_metadata?.avatarId || selectedAvatarId);
-        if (session.user.user_metadata?.avatarId !== accountAvatarId) {
-          persistAvatarChoice(accountAvatarId);
-        }
-      }
-      if (session?.user) {
-        pullCloudProgress();
-      } else {
-        refreshPersonalizedCollections();
-        hydrateContinueRow();
-      }
-    });
-
     renderAuthUI();
     renderNotifications();
     if (state.session?.user) {
       await pullCloudProgress();
+    } else {
+      refreshPersonalizedCollections();
+      hydrateContinueRow();
     }
   } catch {
     setAuthHint("Sign in is currently unavailable.");
+    renderAuthUI();
   }
 }
 
@@ -908,34 +883,43 @@ function renderAuthUI() {
 }
 
 async function signIn() {
-  if (!state.supabase) return;
-
-  const identifier = String(el.authIdentifier.value || "").trim().toLowerCase();
+  const identifier = normalizeIdentifier(el.authIdentifier.value);
   const password = String(el.authPassword.value || "");
-  if (!identifier || !password) {
-    setAuthHint("Enter username/email and password.");
+
+  if (!identifier || !isValidPassword(password)) {
+    setAuthHint("Enter a valid username/email and password.");
     return;
   }
 
-  const email = identifier.includes("@") ? identifier : `${identifier}@cinerune.user`;
-  const { error } = await state.supabase.auth.signInWithPassword({ email, password });
-  if (error) {
+  try {
+    const session = await apiRequest("/auth/login", {
+      method: "POST",
+      body: { identifier, password }
+    });
+    if (!session?.access_token) {
+      setAuthHint("Sign in failed. Try again.");
+      return;
+    }
+    setStoredSession(session);
+    state.session = session;
+    syncProgressState();
+    syncBookmarksState();
+    await persistAvatarChoice(selectedAvatarId);
+    renderAuthUI();
+    await pullCloudProgress();
+    setAuthHint("Signed in.");
+    closeAuthModal();
+  } catch (error) {
     setAuthHint(`Sign in failed: ${error.message}`);
-    return;
   }
-
-  await persistAvatarChoice(selectedAvatarId);
-  setAuthHint("Signed in.");
-  closeAuthModal();
 }
 
 async function signUp() {
-  if (!state.supabase) return;
-
-  const username = String(el.signupUsername.value || "").trim().toLowerCase();
+  const username = normalizeUsername(el.signupUsername.value);
   const password = String(el.signupPassword.value || "");
   const confirmPassword = String(el.signupConfirm.value || "");
-  if (!username || password.length < 6) {
+
+  if (!username || !isValidPassword(password)) {
     setAuthHint("Provide a username and a password (6+ chars).");
     return;
   }
@@ -944,24 +928,41 @@ async function signUp() {
     return;
   }
 
-  const payload = {
-    email: `${username}@cinerune.user`,
-    password,
-    options: { data: { username, avatarId: normalizeAvatarId(selectedAvatarId) } }
-  };
-
-  const { error } = await state.supabase.auth.signUp(payload);
-  if (error) {
+  try {
+    await apiRequest("/auth/signup", {
+      method: "POST",
+      body: {
+        username,
+        password,
+        avatarId: normalizeAvatarId(selectedAvatarId)
+      }
+    });
+    setAuthHint("Account created. Sign in with your username and password.");
+  } catch (error) {
     setAuthHint(`Sign up failed: ${error.message}`);
-    return;
   }
-
-  setAuthHint("Account created. Sign in with your username and password.");
 }
 
 async function signOut() {
-  if (!state.supabase) return;
-  await state.supabase.auth.signOut();
+  try {
+    const session = await ensureSession();
+    if (session?.access_token) {
+      await apiRequest("/auth/logout", {
+        method: "POST",
+        headers: authHeaders(session)
+      });
+    }
+  } catch {
+    // ignore logout failures
+  }
+
+  clearStoredSession();
+  state.session = null;
+  syncProgressState();
+  syncBookmarksState();
+  renderAuthUI();
+  refreshPersonalizedCollections();
+  hydrateContinueRow();
   setAuthHint("Signed out.");
 }
 
@@ -973,6 +974,30 @@ function onAuthEnter(event) {
   } else {
     signIn();
   }
+}
+
+function sanitizeText(value, maxLen) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return trimmed.slice(0, maxLen);
+}
+
+function normalizeIdentifier(value) {
+  const trimmed = sanitizeText(value, INPUT_LIMITS.identifierMax).toLowerCase();
+  if (!trimmed) return "";
+  if (trimmed.includes("@")) {
+    return /.+@.+\..+/.test(trimmed) ? trimmed : "";
+  }
+  return /^[a-z0-9._-]{3,24}$/.test(trimmed) ? trimmed : "";
+}
+
+function normalizeUsername(value) {
+  const trimmed = sanitizeText(value, INPUT_LIMITS.usernameMax).toLowerCase();
+  return /^[a-z0-9._-]{3,24}$/.test(trimmed) ? trimmed : "";
+}
+
+function isValidPassword(value) {
+  return typeof value === "string" && value.length >= 6 && value.length <= INPUT_LIMITS.passwordMax;
 }
 
 function normalizeAvatarId(value) {
@@ -1099,10 +1124,16 @@ async function persistAvatarChoice(avatarId) {
   selectedAvatarId = normalized;
   localStorage.setItem("cinerune:avatar-choice", JSON.stringify(normalized));
 
-  if (!state.session?.user || !state.supabase) return;
+  if (!state.session?.user) return;
 
   try {
-    await state.supabase.auth.updateUser({ data: { avatarId: normalized } });
+    const session = await ensureSession();
+    if (!session) return;
+    await apiRequest("/auth/update", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: { avatarId: normalized }
+    });
   } catch {
     // ignore avatar sync errors
   }
@@ -1135,9 +1166,9 @@ function openAuthModal(mode = "login") {
 }
 
 async function syncProgressToCloud() {
-  if (!state.session?.user || !state.supabase) {
-    return;
-  }
+  if (!state.session?.user) return;
+  const session = await ensureSession();
+  if (!session) return;
 
   const rows = Object.values(state.progress).slice(-240).map((entry) => ({
     user_id: state.session.user.id,
@@ -1155,11 +1186,13 @@ async function syncProgressToCloud() {
     return;
   }
 
-  const { error } = await state.supabase
-    .from("watch_progress")
-    .upsert(rows, { onConflict: "user_id,media_type,content_id,season_number,episode_number" });
-
-  if (error) {
+  try {
+    await apiRequest("/progress/push", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: { rows }
+    });
+  } catch {
     setStatus("Could not save progress right now.");
     return;
   }
@@ -1168,16 +1201,16 @@ async function syncProgressToCloud() {
 }
 
 async function pullCloudProgress() {
-  if (!state.session?.user || !state.supabase) return;
+  if (!state.session?.user) return;
+  const session = await ensureSession();
+  if (!session) return;
 
-  const { data, error } = await state.supabase
-    .from("watch_progress")
-    .select("media_type,content_id,season_number,episode_number,timestamp_seconds,duration_seconds,progress_percent,updated_at")
-    .eq("user_id", state.session.user.id)
-    .order("updated_at", { ascending: false })
-    .limit(500);
-
-  if (error) {
+  let data = null;
+  try {
+    data = await apiRequest("/progress/pull?limit=500", {
+      headers: authHeaders(session)
+    });
+  } catch {
     setStatus("Could not load saved progress.");
     return;
   }
@@ -1333,7 +1366,7 @@ function buildPagerPages(current, total) {
 }
 
 function queueAutoSync(immediate = false) {
-  if (!state.session?.user || !state.supabase) return;
+  if (!state.session?.user) return;
 
   const minGapMs = 15000;
   const elapsed = Date.now() - state.lastSyncAt;

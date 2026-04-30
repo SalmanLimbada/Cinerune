@@ -4,6 +4,9 @@ import {
 } from "./catalog.js?v=20260427c";
 
 const query = new URLSearchParams(window.location.search);
+const INPUT_LIMITS = {
+  searchMax: 80
+};
 
 const el = {
   searchPageTitle: document.getElementById("searchPageTitle"),
@@ -17,18 +20,20 @@ boot();
 
 async function boot() {
   initTmdb({
-    apiKey: String(window.CINERUNE_CONFIG?.tmdbApiKey || "").trim(),
-    readAccessToken: String(window.CINERUNE_CONFIG?.tmdbReadAccessToken || "").trim(),
+    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 
-  const term = String(query.get("q") || "").trim();
+  const term = sanitizeText(query.get("q"), INPUT_LIMITS.searchMax);
   el.searchPageInput.value = term;
 
   el.searchPageInput.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
-    const nextTerm = String(el.searchPageInput.value || "").trim();
+    const nextTerm = sanitizeText(el.searchPageInput.value, INPUT_LIMITS.searchMax);
+    if (el.searchPageInput.value !== nextTerm) {
+      el.searchPageInput.value = nextTerm;
+    }
     if (!nextTerm) return;
     const url = new URL("./search.html", window.location.href);
     url.searchParams.set("q", nextTerm);
@@ -56,6 +61,12 @@ async function boot() {
     renderPosterCards([]);
     el.searchPageStatus.textContent = `Could not load results for "${term}" right now.`;
   }
+}
+
+function sanitizeText(value, maxLen) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return trimmed.slice(0, maxLen);
 }
 
 function renderPosterCards(items) {

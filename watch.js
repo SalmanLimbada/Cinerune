@@ -1,4 +1,4 @@
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { apiRequest, authHeaders, ensureSession } from "./auth-client.js";
 import {
   initTmdb,
   fetchItemDetailsById,
@@ -16,6 +16,7 @@ const legacyProgressKey = "cinerune:progress";
 const progressBaseKey = "cinerune:progress";
 const bookmarksBaseKey = "cinerune:bookmarks";
 const reportsKey = "cinerune:reports";
+const REPORT_LIMIT = 500;
 
 function getBookmarksKey(session) {
   const userId = session?.user?.id ? String(session.user.id) : "";
@@ -73,6 +74,8 @@ const state = {
   season: Number(query.get("s")) || 1,
   episode: Number(query.get("e")) || 1,
   resumeMode: query.get("resume") === "1",
+  resumeAttempted: false,
+  resumeTarget: 0,
   resumeFallbackTimer: null,
   lastPlayerEventAt: 0,
   lastPlaybackTime: 0,
@@ -84,7 +87,6 @@ const state = {
   progress: {},
   bookmarks: readJson(getBookmarksKey(null), {}),
   reports: readJson(reportsKey, []),
-  supabase: null,
   session: null,
   item: null,
   autoSyncTimer: null,
@@ -96,8 +98,7 @@ boot();
 async function boot() {
   syncProgressState();
   initTmdb({
-    apiKey: String(window.CINERUNE_CONFIG?.tmdbApiKey || "").trim(),
-    readAccessToken: String(window.CINERUNE_CONFIG?.tmdbReadAccessToken || "").trim(),
+    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 
@@ -356,18 +357,26 @@ function loadPlayer() {
     url.searchParams.set("episodeSelector", "true");
   }
 
-  const resume = state.resumeMode ? getSavedProgress() : null;
+  const resume = state.resumeMode && !state.resumeAttempted ? getSavedProgress() : null;
   let appliedResume = false;
+  state.resumeTarget = 0;
   if (resume?.timestamp > 0 && Number(resume.progress || 0) < 98) {
     const duration = Number(resume.duration || 0);
     let safeTimestamp = Math.floor(Number(resume.timestamp));
     if (duration > 0) {
       safeTimestamp = Math.min(Math.max(safeTimestamp, 0), Math.max(duration - 5, 0));
     }
-    if (safeTimestamp > 2) {
+    const minRemaining = duration > 0 ? 30 : 0;
+    if (safeTimestamp > 2 && (duration === 0 || safeTimestamp < duration - minRemaining)) {
       url.searchParams.set("progress", String(safeTimestamp));
       appliedResume = true;
+      state.resumeTarget = safeTimestamp;
     }
+  }
+
+  if (state.resumeMode && !appliedResume) {
+    state.resumeMode = false;
+    state.resumeAttempted = true;
   }
 
   el.playerFrame.src = url.toString();
@@ -386,17 +395,22 @@ function scheduleResumeFallback(appliedResume) {
 
   const startedAt = Date.now();
   const initialPlayback = state.lastPlaybackTime;
+  const minProgress = Math.max(initialPlayback + 8, 8);
+  const target = Number(state.resumeTarget || 0);
 
   state.resumeFallbackTimer = window.setTimeout(() => {
     const noEvents = state.lastPlayerEventAt < startedAt;
-    const noProgress = state.lastPlaybackTime <= initialPlayback;
-    if (noEvents || noProgress) {
+    const noProgress = state.lastPlaybackTime <= minProgress;
+    const missedTarget = target > 0 && state.lastPlaybackTime < target - 6;
+    if (noEvents || noProgress || missedTarget) {
       state.resumeMode = false;
+      state.resumeAttempted = true;
+      state.resumeTarget = 0;
       state.lastPlaybackTime = 0;
       state.lastPlayerEventAt = 0;
       loadPlayer();
     }
-  }, 7000);
+  }, 12000);
 }
 
 
@@ -487,7 +501,10 @@ function saveBookmark(status) {
 }
 
 function submitReport() {
-  const message = String(el.reportMessage.value || "").trim();
+  const message = sanitizeText(el.reportMessage.value, REPORT_LIMIT);
+  if (el.reportMessage.value !== message) {
+    el.reportMessage.value = message;
+  }
   if (!message) {
     setStatus("Write a report message first.");
     return;
@@ -505,6 +522,12 @@ function submitReport() {
   localStorage.setItem(reportsKey, JSON.stringify(state.reports.slice(0, 200)));
   el.reportDialog.close("submit");
   setStatus("Report submitted. Thank you.");
+}
+
+function sanitizeText(value, maxLen) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return trimmed.slice(0, maxLen);
 }
 
 function getSavedProgress() {
@@ -576,6 +599,12 @@ function onPlayerMessage(event) {
     state.lastPlaybackTime = Math.max(0, Number(data.currentTime) || 0);
   }
 
+  if (state.resumeTarget > 0 && state.lastPlaybackTime >= state.resumeTarget - 2) {
+    state.resumeMode = false;
+    state.resumeAttempted = true;
+    state.resumeTarget = 0;
+  }
+
   state.progress[key] = {
     mediaType,
     id,
@@ -603,31 +632,14 @@ function onPlayerMessage(event) {
 }
 
 async function initAuth() {
-  const config = window.CINERUNE_CONFIG || {};
-  const supabaseUrl = String(config.supabaseUrl || "").trim();
-  const supabasePublishableKey = String(config.supabasePublishableKey || config.supabaseAnonKey || "").trim();
-
-  if (!supabaseUrl || !supabasePublishableKey) return;
-
   try {
-    state.supabase = createClient(supabaseUrl, supabasePublishableKey, {
-      auth: { persistSession: true, autoRefreshToken: true }
-    });
-
-    const { data } = await state.supabase.auth.getSession();
-    state.session = data?.session || null;
+    const session = await ensureSession();
+    state.session = session;
     syncProgressState();
-    if (state.session?.user) queueAutoSync(true);
+    state.bookmarks = readJson(getBookmarksKey(session), {});
+    syncBookmarkButton();
     renderWatchAccountUI();
-
-    state.supabase.auth.onAuthStateChange((_event, session) => {
-      state.session = session;
-      syncProgressState();
-      state.bookmarks = readJson(getBookmarksKey(session), {});
-      syncBookmarkButton();
-      renderWatchAccountUI();
-      if (session?.user) queueAutoSync(true);
-    });
+    if (state.session?.user) queueAutoSync(true);
   } catch {
     // ignore auth errors on watch page
   }
@@ -668,9 +680,9 @@ function closeWatchAccountMenu() {
 }
 
 async function syncProgressToCloud() {
-  if (!state.session?.user || !state.supabase) {
-    return;
-  }
+  if (!state.session?.user) return;
+  const session = await ensureSession();
+  if (!session) return;
 
   const rows = Object.values(state.progress).slice(-240).map((entry) => ({
     user_id: state.session.user.id,
@@ -688,11 +700,13 @@ async function syncProgressToCloud() {
     return;
   }
 
-  const { error } = await state.supabase
-    .from("watch_progress")
-    .upsert(rows, { onConflict: "user_id,media_type,content_id,season_number,episode_number" });
-
-  if (error) {
+  try {
+    await apiRequest("/progress/push", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: { rows }
+    });
+  } catch (error) {
     setStatus(`Sync failed: ${error.message}`);
     return;
   }
@@ -701,7 +715,7 @@ async function syncProgressToCloud() {
 }
 
 function queueAutoSync(immediate = false) {
-  if (!state.session?.user || !state.supabase) return;
+  if (!state.session?.user) return;
 
   const minGapMs = 15000;
   const elapsed = Date.now() - state.lastSyncAt;

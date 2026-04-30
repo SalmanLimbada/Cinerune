@@ -4,7 +4,7 @@ import {
   titleById,
   posterById
 } from "./catalog.js?v=20260427c";
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { ensureSession } from "./auth-client.js";
 
 const bookmarksBaseKey = "cinerune:bookmarks";
 
@@ -23,7 +23,6 @@ const el = {
 };
 
 const state = {
-  supabase: null,
   session: null
 };
 
@@ -31,8 +30,7 @@ boot();
 
 async function boot() {
   initTmdb({
-    apiKey: String(window.CINERUNE_CONFIG?.tmdbApiKey || "").trim(),
-    readAccessToken: String(window.CINERUNE_CONFIG?.tmdbReadAccessToken || "").trim(),
+    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 
@@ -62,21 +60,9 @@ async function boot() {
 }
 
 async function initAuth() {
-  const config = window.CINERUNE_CONFIG || {};
-  const supabaseUrl = String(config.supabaseUrl || "").trim();
-  const supabasePublishableKey = String(config.supabasePublishableKey || config.supabaseAnonKey || "").trim();
-
-  if (!supabaseUrl || !supabasePublishableKey) return;
-
   try {
-    state.supabase = createClient(supabaseUrl, supabasePublishableKey, {
-      auth: { persistSession: true, autoRefreshToken: true }
-    });
-
-    const { data } = await state.supabase.auth.getSession();
-    state.session = data?.session || null;
+    state.session = await ensureSession();
   } catch {
-    state.supabase = null;
     state.session = null;
   }
 }
