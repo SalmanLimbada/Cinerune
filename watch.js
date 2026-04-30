@@ -382,7 +382,7 @@ function loadPlayer() {
   el.playerFrame.src = url.toString();
   scheduleResumeFallback(appliedResume);
 
-    if (state.mediaType !== "tv") setStatus("Player loaded.");
+    // Do not show a transient "Player loaded" message to users.
 }
 
 function scheduleResumeFallback(appliedResume) {
@@ -707,7 +707,8 @@ async function syncProgressToCloud() {
       body: { rows }
     });
   } catch (error) {
-    setStatus(`Sync failed: ${error.message}`);
+    // Don't surface technical sync errors to the user; log for debugging instead.
+    console.warn("Sync failed:", error);
     return;
   }
 
