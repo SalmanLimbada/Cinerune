@@ -3,5 +3,5 @@ main = "worker/index.js"
 compatibility_date = "2026-04-29"
 
 kv_namespaces = [
-  { binding = "RATE_LIMIT_KV", id = "REPLACE_WITH_KV_ID" }
+  { binding = "RATE_LIMIT_KV", id = "cbfb8af40322452dac30ac40270ee291" }
 ]
