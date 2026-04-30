@@ -6,6 +6,6 @@ compatibility_date = "2026-04-29"
 directory = "."
 binding = "ASSETS"
 
-kv_namespaces = [
-  { binding = "RATE_LIMIT_KV", id = "cbfb8af40322452dac30ac40270ee291" }
-]
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "cbfb8af40322452dac30ac40270ee291"
