@@ -1,4 +1,4 @@
 window.CINERUNE_CONFIG = {
-  apiBase: "",
+  apiBase: "https://cinerune.extraburner8.workers.dev",
   tmdbLanguage: "en-US"
 };
