@@ -7,6 +7,13 @@ export default {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin") || "*";
 
+    if (!url.pathname.startsWith("/api/")) {
+      if (env.ASSETS?.fetch) {
+        return env.ASSETS.fetch(request);
+      }
+      return new Response("Frontend assets are not configured.", { status: 500 });
+    }
+
     if (request.method === "OPTIONS") {
       return withCors(new Response(null, { status: 204 }), origin);
     }
