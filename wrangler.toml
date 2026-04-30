@@ -1,7 +1,10 @@
 name = "cinerune"
 main = "worker/index.js"
 compatibility_date = "2026-04-29"
-assets = { directory = ".", binding = "ASSETS" }
+
+[assets]
+directory = "."
+binding = "ASSETS"
 
 kv_namespaces = [
   { binding = "RATE_LIMIT_KV", id = "cbfb8af40322452dac30ac40270ee291" }
