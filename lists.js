@@ -176,7 +176,7 @@ function renderList(container, entries, options = {}) {
     const title = node.querySelector(".poster-title");
     const sub = node.querySelector(".poster-sub");
 
-    image.src = item.poster || buildPosterPlaceholder(item.title);
+    setPosterImage(image, item);
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
     sub.textContent = item.progressMeta || [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
@@ -229,6 +229,17 @@ function openWatchPage(id, mediaType, season = 1, episode = 1, resume = false) {
     url.searchParams.set("resume", "1");
   }
   window.location.href = url.toString();
+}
+
+function setPosterImage(image, item) {
+  const fallback = buildPosterPlaceholder(item?.title);
+  image.loading = "eager";
+  image.decoding = "async";
+  image.onerror = () => {
+    image.onerror = null;
+    image.src = fallback;
+  };
+  image.src = item?.poster || fallback;
 }
 
 function hideBookmarkSections() {

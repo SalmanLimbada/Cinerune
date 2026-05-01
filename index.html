@@ -41,6 +41,7 @@
           <div id="notificationsMenu" class="account-menu notifications-menu" hidden>
             <div class="notifications-head">
               <strong>Notifications</strong>
+              <button id="notificationsMarkAll" class="mini-action-btn" type="button">Read</button>
             </div>
             <div id="notificationsList" class="notifications-list"></div>
           </div>
@@ -101,6 +102,10 @@
               <input id="signupUsername" type="text" placeholder="pick a username" maxlength="24" />
             </label>
             <label>
+              <span>Email <em>optional</em></span>
+              <input id="signupEmail" type="email" placeholder="you@example.com" maxlength="80" autocomplete="email" />
+            </label>
+            <label>
               <span>Password</span>
               <input id="signupPassword" type="password" placeholder="create a password" maxlength="128" />
             </label>
@@ -117,10 +122,11 @@
         </div>
 
         <div id="signedInView" hidden>
-          <h2>Account</h2>
-          <div class="signed-in-profile">
+          <div class="settings-hero">
             <img id="accountAvatar" class="account-avatar" alt="Selected avatar" />
             <div>
+              <p class="settings-kicker">Account Settings</p>
+              <h2>Profile and Security</h2>
               <p class="tiny">Signed in as <strong id="authUserEmail">-</strong></p>
               <p id="signedInHint" class="tiny muted">You are signed in.</p>
             </div>
@@ -129,37 +135,79 @@
             <button id="signOutBtn" class="pill-btn ghost" type="button">Sign Out</button>
           </div>
 
-          <div class="settings-section">
-            <h3>Account Details</h3>
-            <label>
-              <span>Username</span>
-              <input id="settingsUsername" type="text" placeholder="new username" maxlength="24" />
-            </label>
-            <div class="account-actions">
-              <button id="saveUsernameBtn" class="pill-btn" type="button">Save Username</button>
+          <div class="settings-action-list">
+            <button class="settings-action-toggle" type="button" data-settings-toggle="username" aria-expanded="false">
+              <span>
+                <strong>Change Username</strong>
+                <small>Update the name you use to sign in.</small>
+              </span>
+              <span class="settings-action-icon" aria-hidden="true">+</span>
+            </button>
+            <div class="settings-section" data-settings-panel="username" hidden>
+              <label>
+                <span>New Username</span>
+                <input id="settingsUsername" type="text" placeholder="new username" maxlength="24" autocomplete="username" />
+              </label>
+              <div class="account-actions">
+                <button id="saveUsernameBtn" class="pill-btn" type="button">Save Username</button>
+              </div>
             </div>
-          </div>
 
-          <div class="settings-section">
-            <h3>Password</h3>
-            <label>
-              <span>New Password</span>
-              <input id="settingsPassword" type="password" placeholder="new password" maxlength="128" />
-            </label>
-            <label>
-              <span>Confirm Password</span>
-              <input id="settingsPasswordConfirm" type="password" placeholder="re-enter new password" maxlength="128" />
-            </label>
-            <div class="account-actions">
-              <button id="savePasswordBtn" class="pill-btn" type="button">Update Password</button>
+            <button class="settings-action-toggle" type="button" data-settings-toggle="email" aria-expanded="false">
+              <span>
+                <strong>Add Email</strong>
+                <small>Optional login backup if you forget your username.</small>
+              </span>
+              <span class="settings-action-icon" aria-hidden="true">+</span>
+            </button>
+            <div class="settings-section" data-settings-panel="email" hidden>
+              <label>
+                <span>Email Address</span>
+                <input id="settingsEmail" type="email" placeholder="you@example.com" maxlength="80" autocomplete="email" />
+              </label>
+              <div class="account-actions">
+                <button id="saveEmailBtn" class="pill-btn" type="button">Save Email</button>
+              </div>
             </div>
-          </div>
 
-          <div class="avatar-picker-block compact">
-            <div class="row-head compact">
-              <h3>Change Avatar</h3>
+            <button class="settings-action-toggle" type="button" data-settings-toggle="password" aria-expanded="false">
+              <span>
+                <strong>Change Password</strong>
+                <small>Old password required, new password entered twice.</small>
+              </span>
+              <span class="settings-action-icon" aria-hidden="true">+</span>
+            </button>
+            <div class="settings-section" data-settings-panel="password" hidden>
+              <label>
+                <span>Old Password</span>
+                <input id="settingsCurrentPassword" type="password" placeholder="current password" maxlength="128" autocomplete="off" />
+              </label>
+              <label>
+                <span>New Password</span>
+                <input id="settingsPassword" type="password" placeholder="new password" maxlength="128" autocomplete="new-password" />
+              </label>
+              <label>
+                <span>Confirm New Password</span>
+                <input id="settingsPasswordConfirm" type="password" placeholder="re-enter new password" maxlength="128" autocomplete="new-password" />
+              </label>
+              <div class="account-actions">
+                <button id="savePasswordBtn" class="pill-btn" type="button">Update Password</button>
+              </div>
             </div>
-            <div id="signedInAvatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
+
+            <button class="settings-action-toggle" type="button" data-settings-toggle="avatar" aria-expanded="false">
+              <span>
+                <strong>Change Avatar</strong>
+                <small>Pick a character image for your profile.</small>
+              </span>
+              <span class="settings-action-icon" aria-hidden="true">+</span>
+            </button>
+            <div class="avatar-picker-block compact" data-settings-panel="avatar" hidden>
+              <div class="row-head compact">
+                <h3>Change Avatar</h3>
+              </div>
+              <div id="signedInAvatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
+            </div>
           </div>
         </div>
       </div>

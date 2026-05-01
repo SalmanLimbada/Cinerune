@@ -243,7 +243,7 @@ function hydrateInfo() {
     item.year ? `<span class="badge">${item.year}</span>` : ""
   ].join("");
 
-  el.sidePoster.src = item.poster;
+  setPosterImage(el.sidePoster, item);
   el.sidePoster.alt = `${item.title} poster`;
   el.sidePlot.textContent = item.plot || "No overview available.";
   el.sideType.textContent = item.released ? `Released: ${item.released}` : "";
@@ -480,7 +480,7 @@ async function renderRelated() {
 
     const image = document.createElement("img");
     image.className = "poster-img";
-    image.src = item.poster;
+    setPosterImage(image, item);
     image.alt = `${item.title} poster`;
     image.loading = "lazy";
 
@@ -519,6 +519,24 @@ async function renderRelated() {
 
   el.relatedRail.innerHTML = "";
   el.relatedRail.appendChild(fragment);
+}
+
+function setPosterImage(image, item) {
+  if (!image) return;
+  const fallback = buildPosterPlaceholder(item?.title);
+  image.loading = "eager";
+  image.decoding = "async";
+  image.onerror = () => {
+    image.onerror = null;
+    image.src = fallback;
+  };
+  image.src = item?.poster || fallback;
+}
+
+function buildPosterPlaceholder(title) {
+  const safeTitle = escapeHtml(String(title || "Cinerune").slice(0, 28));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#123a5c"/><stop offset="100%" stop-color="#071528"/></linearGradient></defs><rect width="300" height="450" fill="url(#g)"/><rect x="22" y="22" width="256" height="406" rx="18" fill="rgba(255,255,255,0.045)" stroke="rgba(126,216,255,0.18)"/><text x="150" y="214" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="20" font-weight="700" text-anchor="middle">${safeTitle}</text><text x="150" y="246" fill="#9fb6d0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">Poster loading unavailable</text></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 function saveBookmark(status) {

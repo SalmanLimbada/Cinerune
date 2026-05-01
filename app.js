@@ -16,26 +16,22 @@ const isSensitiveCatalogItem = catalogApi.isSensitiveCatalogItem || (() => false
 const legacyProgressKey = "cinerune:progress";
 const progressBaseKey = "cinerune:progress";
 const bookmarksBaseKey = "cinerune:bookmarks";
+const notificationReadBaseKey = "cinerune:notification-read";
 const homeCacheKey = "cinerune:home-cache";
 const INPUT_LIMITS = {
   identifierMax: 80,
   usernameMax: 24,
+  emailMax: 80,
   passwordMax: 128,
   searchMax: 80
 };
 const avatarOptions = [
-  { id: "ninja", label: "Ninja Boy", bg1: "#ff9900", bg2: "#d32f2f", skin: "#ffdfbd", hair: "#ffdd00", shirt: "#ff6600", eyes: "#3b5998", accent: "#003366", hairStyle: "spiky", accessory: "headband" },
-  { id: "pirate", label: "Pirate King", bg1: "#4dabf7", bg2: "#1864ab", skin: "#f1c27d", hair: "#111111", shirt: "#e03131", eyes: "#111111", accent: "#f5c518", hairStyle: "short", accessory: "strawhat" },
-  { id: "wizard", label: "Chosen Wizard", bg1: "#660000", bg2: "#220000", skin: "#ffe0c2", hair: "#2c1b18", shirt: "#333333", eyes: "#296d39", accent: "#ffd700", hairStyle: "short", accessory: "glasses_scar" },
-  { id: "spider", label: "Web Slinger", bg1: "#e03131", bg2: "#0b7285", skin: "#f3d2bb", hair: "#4d331f", shirt: "#c92a2a", eyes: "#5c3a21", accent: "#1864ab", hairStyle: "short", accessory: "none" },
-  { id: "jinx", label: "Chaos Girl", bg1: "#c8a7ff", bg2: "#862e9c", skin: "#fdf0f5", hair: "#22b8cf", shirt: "#212529", eyes: "#e64980", accent: "#333", hairStyle: "long", accessory: "none" },
-  { id: "wednesday", label: "Goth Girl", bg1: "#495057", bg2: "#212529", skin: "#f8f9fa", hair: "#111", shirt: "#111", eyes: "#111", accent: "#fff", hairStyle: "long", accessory: "none" },
-  { id: "chemist", label: "The Chemist", bg1: "#b2f2bb", bg2: "#08b361", skin: "#ffdfbd", hair: "#111", shirt: "#2f9e44", eyes: "#111", accent: "#a67c52", hairStyle: "bald", accessory: "glasses_goatee" },
-  { id: "sailor", label: "Moon Princess", bg1: "#ffb8cb", bg2: "#c2255c", skin: "#ffe3e3", hair: "#ffd43b", shirt: "#f8f9fa", eyes: "#1c7ed6", accent: "#fcc419", hairStyle: "bun", accessory: "star" },
-  { id: "sorcerer", label: "Blindfold Sorcerer", bg1: "#3b5bdb", bg2: "#1864ab", skin: "#f8f9fa", hair: "#e9ecef", shirt: "#111", eyes: "#666", accent: "#111", hairStyle: "spiky", accessory: "blindfold" },
-  { id: "slayer", label: "Demon Hunter", bg1: "#b2f2bb", bg2: "#2b8a3e", skin: "#f1c27d", hair: "#8b0000", shirt: "#2b8a3e", eyes: "#8b0000", accent: "#f1c27d", hairStyle: "spiky", accessory: "earring" },
-  { id: "spy", label: "Telepath Girl", bg1: "#ffc9c9", bg2: "#e64980", skin: "#ffe3e3", hair: "#ffb8cb", shirt: "#212529", eyes: "#2b8a3e", accent: "#111", hairStyle: "bob", accessory: "none" },
-  { id: "saiyan", label: "Super Warrior", bg1: "#ffec99", bg2: "#e8590c", skin: "#f1c27d", hair: "#111", shirt: "#f08c00", eyes: "#111", accent: "#111", hairStyle: "spiky", accessory: "none" }
+  { id: "luffy", label: "Monkey D. Luffy", src: "https://avatarfiles.alphacoders.com/141/141955.png" },
+  { id: "naruto", label: "Naruto Uzumaki", src: "https://avatarfiles.alphacoders.com/106/106708.jpg" },
+  { id: "goku", label: "Goku", src: "https://avatarfiles.alphacoders.com/263/263487.png" },
+  { id: "spider", label: "Spider-Man", src: "https://avatarfiles.alphacoders.com/254/254569.jpg" },
+  { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" },
+  { id: "spider-art", label: "Spider-Man Art", src: "https://avatarfiles.alphacoders.com/375/375895.png" }
 ];
 
 const el = {
@@ -44,6 +40,7 @@ const el = {
   notificationsBadge: document.getElementById("notificationsBadge"),
   notificationsMenu: document.getElementById("notificationsMenu"),
   notificationsList: document.getElementById("notificationsList"),
+  notificationsMarkAll: document.getElementById("notificationsMarkAll"),
   homeListsLink: document.getElementById("homeListsLink"),
   toggleAuth: document.getElementById("toggleAuth"),
   accountMenuWrap: document.getElementById("accountMenuWrap"),
@@ -61,13 +58,17 @@ const el = {
   signedInView: document.getElementById("signedInView"),
   signedInHint: document.getElementById("signedInHint"),
   settingsUsername: document.getElementById("settingsUsername"),
+  settingsEmail: document.getElementById("settingsEmail"),
+  settingsCurrentPassword: document.getElementById("settingsCurrentPassword"),
   settingsPassword: document.getElementById("settingsPassword"),
   settingsPasswordConfirm: document.getElementById("settingsPasswordConfirm"),
   saveUsernameBtn: document.getElementById("saveUsernameBtn"),
+  saveEmailBtn: document.getElementById("saveEmailBtn"),
   savePasswordBtn: document.getElementById("savePasswordBtn"),
   authIdentifier: document.getElementById("authIdentifier"),
   authPassword: document.getElementById("authPassword"),
   signupUsername: document.getElementById("signupUsername"),
+  signupEmail: document.getElementById("signupEmail"),
   signupPassword: document.getElementById("signupPassword"),
   signupConfirm: document.getElementById("signupConfirm"),
   signInBtn: document.getElementById("signInBtn"),
@@ -125,6 +126,7 @@ const state = {
   searchPage: 1,
   searchTotalPages: 1,
   notifications: [],
+  readNotificationIds: new Set(),
   autoSyncTimer: null,
   lastSyncAt: 0,
   heroRotationTimer: null
@@ -140,7 +142,12 @@ function getProgressKey(session) {
   return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
 }
 
-let selectedAvatarId = readJson("cinerune:avatar-choice", "ninja");
+function getNotificationReadKey(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  return userId ? `${notificationReadBaseKey}:user:${userId}` : `${notificationReadBaseKey}:guest`;
+}
+
+let selectedAvatarId = readJson("cinerune:avatar-choice", "luffy");
 let authModalMode = "login";
 const startupQuery = new URLSearchParams(window.location.search);
 const startupAuthMode = startupQuery.get("auth") || startupQuery.get("modal");
@@ -182,6 +189,12 @@ function bindEvents() {
       toggleNotificationsMenu();
     });
   }
+  if (el.notificationsMarkAll) {
+    el.notificationsMarkAll.addEventListener("click", markAllNotificationsRead);
+  }
+  document.querySelectorAll("[data-settings-toggle]").forEach((button) => {
+    button.addEventListener("click", () => toggleSettingsPanel(button.dataset.settingsToggle));
+  });
 
   if (el.toggleAuth) {
     el.toggleAuth.addEventListener("click", () => {
@@ -209,6 +222,7 @@ function bindEvents() {
   if (el.signOutBtn) el.signOutBtn.addEventListener("click", signOut);
   if (el.signOutMenuBtn) el.signOutMenuBtn.addEventListener("click", signOut);
   if (el.saveUsernameBtn) el.saveUsernameBtn.addEventListener("click", saveUsername);
+  if (el.saveEmailBtn) el.saveEmailBtn.addEventListener("click", saveEmail);
   if (el.savePasswordBtn) el.savePasswordBtn.addEventListener("click", savePassword);
   if (el.loginTabBtn) el.loginTabBtn.addEventListener("click", () => openAuthModal("login"));
   if (el.signupTabBtn) el.signupTabBtn.addEventListener("click", () => openAuthModal("signup"));
@@ -226,7 +240,10 @@ function bindEvents() {
   if (el.authPassword) {
     el.authPassword.addEventListener("keydown", onAuthEnter);
   }
-  [el.signupUsername, el.signupPassword, el.signupConfirm].forEach((input) => {
+  [el.signupUsername, el.signupEmail, el.signupPassword, el.signupConfirm].forEach((input) => {
+    if (input) input.addEventListener("keydown", onAuthEnter);
+  });
+  [el.settingsUsername, el.settingsEmail, el.settingsCurrentPassword, el.settingsPassword, el.settingsPasswordConfirm].forEach((input) => {
     if (input) input.addEventListener("keydown", onAuthEnter);
   });
 
@@ -518,15 +535,13 @@ function renderPosterCards(container, items, options = {}) {
   const fragment = document.createDocumentFragment();
 
   items.forEach((item) => {
-    if (!item?.poster) return;
-
     const node = el.posterCardTemplate.content.firstElementChild.cloneNode(true);
     const button = node.querySelector(".poster-btn");
     const image = node.querySelector(".poster-img");
     const title = node.querySelector(".poster-title");
     const sub = node.querySelector(".poster-sub");
 
-    image.src = item.poster;
+    setPosterImage(image, item);
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
 
@@ -632,12 +647,12 @@ async function refreshNotifications() {
     return;
   }
 
-  const watchingShows = Object.values(state.bookmarks || {})
-    .filter((entry) => entry?.mediaType === "tv" && entry?.status === "watching")
+  const watchedShows = Object.values(state.bookmarks || {})
+    .filter((entry) => entry?.mediaType === "tv" && entry?.status === "watched")
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
     .slice(0, 16);
 
-  const notifications = (await Promise.all(watchingShows.map(buildEpisodeNotification))).filter(Boolean);
+  const notifications = (await Promise.all(watchedShows.map(buildEpisodeNotification))).filter(Boolean);
   state.notifications = notifications.sort((a, b) => Number(b.sortAt || 0) - Number(a.sortAt || 0));
   renderNotifications();
 }
@@ -665,7 +680,7 @@ async function buildEpisodeNotification(entry) {
     return null;
   }
 
-  return {
+  const notification = {
     id,
     mediaType: "tv",
     title: item?.title || entry.title || `Title ${id}`,
@@ -678,6 +693,8 @@ async function buildEpisodeNotification(entry) {
     message: `${item?.title || entry.title || "This show"} has a new episode available.`,
     href: buildWatchHref(id, "tv", latestSeason, latestEpisode)
   };
+  notification.readId = buildNotificationReadId(notification);
+  return notification;
 }
 
 function getLatestWatchedEpisode(showId) {
@@ -712,32 +729,72 @@ function renderNotifications() {
   }
 
   const notifications = state.notifications || [];
-  const count = notifications.length;
-  el.notificationsBadge.textContent = String(count);
-  el.notificationsBadge.toggleAttribute("hidden", count < 1);
+  const unreadCount = notifications.filter((item) => !isNotificationRead(item)).length;
+  el.notificationsBadge.textContent = String(unreadCount);
+  el.notificationsBadge.toggleAttribute("hidden", unreadCount < 1);
+  el.notificationsMarkAll?.toggleAttribute("hidden", unreadCount < 1);
 
-  if (!count) {
+  if (!notifications.length) {
     el.notificationsList.innerHTML = '<p class="notification-empty tiny muted">No new episodes right now.</p>';
     return;
   }
 
   el.notificationsList.innerHTML = notifications.map((item) => `
-    <a class="notification-item" href="${escapeHtml(item.href)}" data-id="${item.id}" data-season="${item.season}" data-episode="${item.episode}">
-      <span class="notification-copy">
-        <strong>${escapeHtml(item.title)}</strong>
-        <span>${escapeHtml(`New episode: S${item.season} E${item.episode}${item.episodeName ? ` - ${item.episodeName}` : ""}`)}</span>
-      </span>
-      <span class="notification-date">${escapeHtml(formatShortDate(item.airDate))}</span>
-    </a>
+    <div class="notification-item${isNotificationRead(item) ? " read" : ""}" data-read-id="${escapeHtml(item.readId)}">
+      <a class="notification-link" href="${escapeHtml(item.href)}" data-id="${item.id}" data-season="${item.season}" data-episode="${item.episode}">
+        <span class="notification-copy">
+          <strong>${escapeHtml(item.title)}</strong>
+          <span>${escapeHtml(`New episode: S${item.season} E${item.episode}${item.episodeName ? ` - ${item.episodeName}` : ""}`)}</span>
+        </span>
+        <span class="notification-date">
+          <span>${escapeHtml(formatTimeAgo(item.airDate))}</span>
+          <span>${escapeHtml(formatShortDate(item.airDate))}</span>
+        </span>
+      </a>
+      <button class="mini-action-btn notification-read-btn" type="button" data-read-id="${escapeHtml(item.readId)}">Read</button>
+    </div>
   `).join("");
 
-  [...el.notificationsList.querySelectorAll(".notification-item")].forEach((node) => {
+  [...el.notificationsList.querySelectorAll(".notification-link")].forEach((node) => {
     node.addEventListener("click", (event) => {
       event.preventDefault();
+      markNotificationRead(node.closest(".notification-item")?.dataset.readId);
       closeNotificationsMenu();
       openWatchPage(Number(node.dataset.id), "tv", Number(node.dataset.season), Number(node.dataset.episode));
     });
   });
+  [...el.notificationsList.querySelectorAll(".notification-read-btn")].forEach((node) => {
+    node.addEventListener("click", () => markNotificationRead(node.dataset.readId));
+  });
+}
+
+function buildNotificationReadId(item) {
+  return `tv:${Number(item.id)}:${Number(item.season)}:${Number(item.episode)}:${String(item.airDate || "")}`;
+}
+
+function isNotificationRead(item) {
+  return state.readNotificationIds?.has(item?.readId || buildNotificationReadId(item));
+}
+
+function markNotificationRead(readId) {
+  if (!readId) return;
+  state.readNotificationIds.add(readId);
+  saveNotificationReadState();
+  renderNotifications();
+}
+
+function markAllNotificationsRead() {
+  (state.notifications || []).forEach((item) => {
+    state.readNotificationIds.add(item.readId || buildNotificationReadId(item));
+  });
+  saveNotificationReadState();
+  renderNotifications();
+}
+
+function saveNotificationReadState() {
+  const values = [...state.readNotificationIds].slice(-200);
+  state.readNotificationIds = new Set(values);
+  localStorage.setItem(getNotificationReadKey(state.session), JSON.stringify(values));
 }
 
 function toggleNotificationsMenu() {
@@ -756,6 +813,44 @@ function closeNotificationsMenu() {
   if (!el.notificationsMenu) return;
   el.notificationsMenu.setAttribute("hidden", "");
   el.notificationsBtn?.setAttribute("aria-expanded", "false");
+}
+
+function toggleSettingsPanel(panelName) {
+  if (!panelName) return;
+  const targetPanel = document.querySelector(`[data-settings-panel="${cssEscape(panelName)}"]`);
+  const targetButton = document.querySelector(`[data-settings-toggle="${cssEscape(panelName)}"]`);
+  if (!targetPanel || !targetButton) return;
+
+  const shouldOpen = targetPanel.hasAttribute("hidden");
+  document.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+    panel.setAttribute("hidden", "");
+  });
+  document.querySelectorAll("[data-settings-toggle]").forEach((button) => {
+    button.setAttribute("aria-expanded", "false");
+  });
+
+  if (shouldOpen) {
+    if (panelName === "password") {
+      if (el.settingsCurrentPassword) el.settingsCurrentPassword.value = "";
+      if (el.settingsPassword) el.settingsPassword.value = "";
+      if (el.settingsPasswordConfirm) el.settingsPasswordConfirm.value = "";
+    }
+    targetPanel.removeAttribute("hidden");
+    targetButton.setAttribute("aria-expanded", "true");
+    const focusTarget = targetPanel.querySelector("input, button");
+    if (focusTarget && panelName !== "avatar") {
+      window.setTimeout(() => focusTarget.focus(), 0);
+    }
+  }
+}
+
+function closeSettingsPanels() {
+  document.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+    panel.setAttribute("hidden", "");
+  });
+  document.querySelectorAll("[data-settings-toggle]").forEach((button) => {
+    button.setAttribute("aria-expanded", "false");
+  });
 }
 
 function openSearchPage(term) {
@@ -799,6 +894,11 @@ function syncBookmarksState() {
   state.bookmarks = readJson(getBookmarksKey(state.session), {});
 }
 
+function syncNotificationReadState() {
+  const values = readJson(getNotificationReadKey(state.session), []);
+  state.readNotificationIds = new Set(Array.isArray(values) ? values : []);
+}
+
 function syncProgressState() {
   const activeKey = getProgressKey(state.session);
   let progress = readJson(activeKey, null);
@@ -820,6 +920,7 @@ async function initAuth() {
     state.session = session;
     syncProgressState();
     syncBookmarksState();
+    syncNotificationReadState();
     renderAuthUI();
     renderNotifications();
     if (state.session?.user) {
@@ -856,7 +957,10 @@ function renderAuthUI() {
 
   if (signedIn) {
     const user = state.session.user;
-    el.authUserEmail.textContent = user.user_metadata?.username || user.email || user.id;
+    const publicEmail = displayEmail(user.email);
+    el.authUserEmail.textContent = publicEmail
+      ? `${user.user_metadata?.username || user.id} (${publicEmail})`
+      : (user.user_metadata?.username || user.id);
     const avatarId = normalizeAvatarId(user.user_metadata?.avatarId || selectedAvatarId);
     selectedAvatarId = avatarId;
     renderAvatarPickers();
@@ -884,6 +988,9 @@ function renderAuthUI() {
     if (el.settingsUsername) {
       el.settingsUsername.value = user.user_metadata?.username || "";
     }
+    if (el.settingsEmail) {
+      el.settingsEmail.value = publicEmail;
+    }
   } else {
     const avatarId = normalizeAvatarId(selectedAvatarId);
     renderActiveAvatar(avatarId);
@@ -892,6 +999,8 @@ function renderAuthUI() {
     el.homeListsLink?.setAttribute("hidden", "");
     if (el.toggleAuth) el.toggleAuth.title = "Sign in";
     if (el.settingsUsername) el.settingsUsername.value = "";
+    if (el.settingsEmail) el.settingsEmail.value = "";
+    if (el.settingsCurrentPassword) el.settingsCurrentPassword.value = "";
     if (el.settingsPassword) el.settingsPassword.value = "";
     if (el.settingsPasswordConfirm) el.settingsPasswordConfirm.value = "";
     setAuthHint("");
@@ -927,6 +1036,7 @@ async function signIn() {
     state.session = session;
     syncProgressState();
     syncBookmarksState();
+    syncNotificationReadState();
     await persistAvatarChoice(selectedAvatarId);
     renderAuthUI();
     await pullCloudProgress();
@@ -939,11 +1049,16 @@ async function signIn() {
 
 async function signUp() {
   const username = normalizeUsername(el.signupUsername.value);
+  const email = normalizeEmail(el.signupEmail?.value || "", true);
   const password = String(el.signupPassword.value || "");
   const confirmPassword = String(el.signupConfirm.value || "");
 
   if (!username || !isValidPassword(password)) {
     setAuthHint("Provide a username and a password (6+ chars).");
+    return;
+  }
+  if (email === null) {
+    setAuthHint("Enter a valid email address or leave it blank.");
     return;
   }
   if (password !== confirmPassword) {
@@ -956,6 +1071,7 @@ async function signUp() {
       method: "POST",
       body: {
         username,
+        email: email || undefined,
         password,
         avatarId: normalizeAvatarId(selectedAvatarId)
       }
@@ -983,6 +1099,7 @@ async function signOut() {
   state.session = null;
   syncProgressState();
   syncBookmarksState();
+  syncNotificationReadState();
   renderAuthUI();
   refreshPersonalizedCollections();
   hydrateContinueRow();
@@ -1022,14 +1139,52 @@ async function saveUsername() {
   }
 }
 
+async function saveEmail() {
+  if (!state.session?.user) {
+    setAuthHint("Sign in first.");
+    return;
+  }
+
+  const email = normalizeEmail(el.settingsEmail?.value || "", true);
+  if (email === null || !email) {
+    setAuthHint("Enter a valid email address.");
+    return;
+  }
+
+  try {
+    const session = await ensureSession();
+    if (!session) {
+      setAuthHint("Sign in again to update your email.");
+      return;
+    }
+    const updated = await apiRequest("/auth/update", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: {
+        email,
+        avatarId: normalizeAvatarId(state.session.user.user_metadata?.avatarId || selectedAvatarId)
+      }
+    });
+    applyUpdatedUser(updated?.user || updated, { email });
+    setAuthHint("Email saved. You can sign in with it now.");
+  } catch (error) {
+    setAuthHint(`Update failed: ${error.message}`);
+  }
+}
+
 async function savePassword() {
   if (!state.session?.user) {
     setAuthHint("Sign in first.");
     return;
   }
 
+  const currentPassword = String(el.settingsCurrentPassword?.value || "");
   const password = String(el.settingsPassword?.value || "");
   const confirm = String(el.settingsPasswordConfirm?.value || "");
+  if (!isValidPassword(currentPassword)) {
+    setAuthHint("Enter your old password first.");
+    return;
+  }
   if (!isValidPassword(password)) {
     setAuthHint("Provide a password with 6-128 characters.");
     return;
@@ -1048,9 +1203,10 @@ async function savePassword() {
     const updated = await apiRequest("/auth/update", {
       method: "POST",
       headers: authHeaders(session),
-      body: { password }
+      body: { currentPassword, password }
     });
     applyUpdatedUser(updated?.user || updated);
+    if (el.settingsCurrentPassword) el.settingsCurrentPassword.value = "";
     if (el.settingsPassword) el.settingsPassword.value = "";
     if (el.settingsPasswordConfirm) el.settingsPasswordConfirm.value = "";
     setAuthHint("Password updated.");
@@ -1091,6 +1247,15 @@ function onAuthEnter(event) {
   event.preventDefault();
   if (authModalMode === "signup") {
     signUp();
+  } else if (authModalMode === "settings") {
+    const target = event.target;
+    if (target === el.settingsPassword || target === el.settingsPasswordConfirm || target === el.settingsCurrentPassword) {
+      savePassword();
+    } else if (target === el.settingsEmail) {
+      saveEmail();
+    } else {
+      saveUsername();
+    }
   } else {
     signIn();
   }
@@ -1116,12 +1281,24 @@ function normalizeUsername(value) {
   return /^[a-z0-9._-]{3,24}$/.test(trimmed) ? trimmed : "";
 }
 
+function normalizeEmail(value, allowBlank = false) {
+  const trimmed = sanitizeText(value, INPUT_LIMITS.emailMax).toLowerCase();
+  if (!trimmed) return allowBlank ? "" : null;
+  return /.+@.+\..+/.test(trimmed) ? trimmed : null;
+}
+
+function displayEmail(value) {
+  const email = normalizeEmail(value || "", true);
+  if (!email || email.endsWith("@cinerune.user")) return "";
+  return email;
+}
+
 function isValidPassword(value) {
   return typeof value === "string" && value.length >= 6 && value.length <= INPUT_LIMITS.passwordMax;
 }
 
 function normalizeAvatarId(value) {
-  const fallback = avatarOptions[0]?.id || "ninja";
+  const fallback = avatarOptions[0]?.id || "luffy";
   return avatarOptions.some((option) => option.id === value) ? value : fallback;
 }
 
@@ -1133,7 +1310,8 @@ function renderAvatarPickers() {
   containers.forEach((container) => {
     container.innerHTML = avatarOptions.map((avatar) => `
       <button class="avatar-option${avatar.id === activeId ? " active" : ""}" type="button" data-avatar="${avatar.id}" aria-label="Select ${avatar.label} avatar">
-        <img class="avatar-preview" src="${avatarDataUri(avatar)}" alt="" aria-hidden="true" />
+        <img class="avatar-preview" src="${avatarImageSrc(avatar)}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+        <span>${escapeHtml(avatar.label)}</span>
       </button>
     `).join("");
 
@@ -1152,14 +1330,14 @@ function renderAvatarPickers() {
 function renderActiveAvatar(avatarId) {
   if (!el.accountAvatar) return;
   const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(avatarId)) || avatarOptions[0];
-  el.accountAvatar.src = avatarDataUri(avatar);
+  el.accountAvatar.src = avatarImageSrc(avatar);
   el.accountAvatar.alt = `${avatar.label} avatar`;
 }
 
 function renderAccountButton(avatarId, label) {
   const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(avatarId)) || avatarOptions[0];
   if (el.authAvatarThumb) {
-    el.authAvatarThumb.src = avatarDataUri(avatar);
+    el.authAvatarThumb.src = avatarImageSrc(avatar);
     el.authAvatarThumb.alt = `${avatar.label} avatar`;
   }
   if (el.authButtonLabel) {
@@ -1167,190 +1345,8 @@ function renderAccountButton(avatarId, label) {
   }
 }
 
-function avatarDataUri(avatar) {
-  const safeLabel = escapeHtml(avatar.label);
-  const safeBg1 = escapeHtml(avatar.bg1);
-  const safeBg2 = escapeHtml(avatar.bg2);
-  const safeSkin = escapeHtml(avatar.skin);
-  const safeHair = escapeHtml(avatar.hair);
-  const safeShirt = escapeHtml(avatar.shirt);
-  const safeEyes = escapeHtml(avatar.eyes);
-  const safeAccent = escapeHtml(avatar.accent);
-
-  const backHair = avatarBackHairSvg(avatar.hairStyle, safeHair);
-  const frontHair = avatarFrontHairSvg(avatar.hairStyle, safeHair);
-  const accessory = avatarAccessorySvg(avatar.accessory, safeAccent, safeEyes);
-
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}">
-      <defs>
-        <linearGradient id="bg-${avatar.id}" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stop-color="${safeBg1}" />
-          <stop offset="100%" stop-color="${safeBg2}" />
-        </linearGradient>
-      </defs>
-
-      <!-- Background Base -->
-      <rect width="128" height="128" rx="32" fill="url(#bg-${avatar.id})" />
-
-      <!-- Back Hair Layer -->
-      ${backHair}
-
-      <!-- Body / Shoulders -->
-      <path d="M 24 128 C 24 96 104 96 104 128" fill="${safeShirt}" />
-      <!-- Inner shirt collar detail -->
-      <path d="M 44 128 C 44 104 84 104 84 128" fill="rgba(255,255,255,0.15)" />
-
-      <!-- Neck -->
-      <rect x="54" y="70" width="20" height="24" rx="8" fill="${safeSkin}" />
-      <!-- Neck Drop Shadow -->
-      <rect x="54" y="78" width="20" height="12" fill="rgba(0,0,0,0.1)" />
-
-      <!-- Head Shape -->
-      <rect x="36" y="28" width="56" height="60" rx="26" fill="${safeSkin}" />
-
-      <!-- Front Hair Layer -->
-      ${frontHair}
-
-      <!-- Eyes -->
-      <circle cx="50" cy="58" r="4" fill="${safeEyes}" />
-      <circle cx="78" cy="58" r="4" fill="${safeEyes}" />
-
-      <!-- Cute Blush -->
-      <circle cx="42" cy="66" r="5" fill="#ff0000" opacity="0.12" />
-      <circle cx="86" cy="66" r="5" fill="#ff0000" opacity="0.12" />
-
-      <!-- Smile -->
-      <path d="M 58 68 Q 64 74 70 68" stroke="${safeEyes}" stroke-width="3" stroke-linecap="round" fill="none" />
-
-      ${accessory}
-    </svg>`.replace(/\s+/g, ' ').trim();
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
-function avatarBackHairSvg(style, color) {
-  if (style === "bald") return "";
-  if (style === "spiky") {
-    return `<path d="M 24 60 L 16 40 L 32 32 L 40 12 L 64 6 L 88 12 L 96 32 L 112 40 L 104 60 Z" fill="${color}" />`;
-  }
-  if (style === "long") {
-    return `
-      <rect x="32" y="40" width="64" height="60" rx="16" fill="${color}" />
-      <path d="M 32 80 L 32 110 C 32 120 44 120 44 110 L 44 80 Z" fill="${color}" />
-      <path d="M 96 80 L 96 110 C 96 120 84 120 84 110 L 84 80 Z" fill="${color}" />
-    `;
-  }
-  if (style === "bun") {
-    return `<circle cx="64" cy="18" r="14" fill="${color}" />`;
-  }
-  if (style === "bob") {
-    return `<rect x="30" y="36" width="68" height="48" rx="20" fill="${color}" />`;
-  }
-  if (style === "curl") {
-     return `
-       <circle cx="34" cy="46" r="16" fill="${color}" />
-       <circle cx="94" cy="46" r="16" fill="${color}" />
-       <circle cx="44" cy="24" r="18" fill="${color}" />
-       <circle cx="84" cy="24" r="18" fill="${color}" />
-       <circle cx="64" cy="16" r="20" fill="${color}" />
-     `;
-  }
-  return "";
-}
-
-function avatarFrontHairSvg(style, color) {
-  if (style === "bald") return "";
-  if (style === "spiky") {
-    return `<path d="M 32 52 L 36 26 L 48 38 L 54 18 L 64 36 L 74 18 L 80 38 L 92 26 L 96 52 Z" fill="${color}" />`;
-  }
-  if (style === "short") {
-    return `<path d="M 32 52 C 32 16 96 16 96 52 C 96 58 84 46 64 42 C 44 38 32 58 32 52 Z" fill="${color}" />`;
-  }
-  if (style === "wave") {
-    return `
-      <path d="M 34 52 Q 44 20 64 26 Q 84 20 94 52 Q 82 36 64 36 Q 46 36 34 52 Z" fill="${color}" />
-      <path d="M 64 26 Q 74 12 90 28 Q 74 18 64 26 Z" fill="${color}" opacity="0.8" />
-    `;
-  }
-  if (style === "bob") {
-    return `
-      <path d="M 36 48 C 36 20 92 20 92 48 Q 78 34 64 34 Q 50 34 36 48 Z" fill="${color}" />
-      <path d="M 30 40 L 40 40 L 40 76 C 40 84 30 84 30 76 Z" fill="${color}" />
-      <path d="M 98 40 L 88 40 L 88 76 C 88 84 98 84 98 76 Z" fill="${color}" />
-    `;
-  }
-  if (style === "curl") {
-    return `
-      <circle cx="48" cy="34" r="12" fill="${color}" />
-      <circle cx="64" cy="30" r="14" fill="${color}" />
-      <circle cx="80" cy="34" r="12" fill="${color}" />
-      <circle cx="38" cy="42" r="10" fill="${color}" />
-      <circle cx="90" cy="42" r="10" fill="${color}" />
-    `;
-  }
-  if (style === "long") {
-    return `<path d="M 36 46 C 36 20 92 20 92 46 Q 78 34 64 34 Q 50 34 36 46 Z" fill="${color}" />`;
-  }
-  if (style === "bun") {
-    return `<path d="M 36 44 C 36 20 92 20 92 44 Q 78 34 64 34 Q 50 34 36 44 Z" fill="${color}" />`;
-  }
-  return `<path d="M 32 52 C 32 16 96 16 96 52 C 96 58 84 46 64 42 C 44 38 32 58 32 52 Z" fill="${color}" />`;
-}
-
-function avatarAccessorySvg(accessory, accent, eyes) {
-  if (accessory === "earring") {
-    return `
-      <circle cx="34" cy="64" r="4" fill="${accent}" />
-      <circle cx="94" cy="64" r="4" fill="${accent}" />
-    `;
-  }
-  if (accessory === "glasses") {
-    return `
-      <rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
-      <rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
-      <line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />
-    `;
-  }
-  if (accessory === "star") {
-    return `<path d="M 82 32 L 84 38 L 90 38 L 85 42 L 87 48 L 82 44 L 77 48 L 79 42 L 74 38 L 80 38 Z" fill="${accent}" />`;
-  }
-  if (accessory === "headband") {
-    return `
-      <rect x="36" y="36" width="56" height="12" fill="${accent}" />
-      <rect x="52" y="38" width="24" height="8" rx="2" fill="#ddd" />
-      <circle cx="56" cy="42" r="2" fill="#444" />
-      <circle cx="72" cy="42" r="2" fill="#444" />
-    `;
-  }
-  if (accessory === "strawhat") {
-    return `
-      <ellipse cx="64" cy="32" rx="46" ry="12" fill="${accent}" />
-      <path d="M 42 30 C 42 8 86 8 86 30 Z" fill="${accent}" />
-      <path d="M 43 26 C 43 28 85 28 85 26 Z" fill="#e03131" stroke="#e03131" stroke-width="3" />
-    `;
-  }
-  if (accessory === "glasses_scar") {
-    return `
-      <rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
-      <rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
-      <line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />
-      <path d="M 64 30 L 60 38 L 64 38 L 58 46" stroke="#8b0000" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
-    `;
-  }
-  if (accessory === "glasses_goatee") {
-    return `
-      <rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
-      <rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" />
-      <line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />
-      <path d="M 56 76 Q 64 90 72 76 Z" fill="${accent}" />
-      <path d="M 52 70 Q 64 62 76 70" stroke="${accent}" stroke-width="3" fill="none" stroke-linecap="round" />
-    `;
-  }
-  if (accessory === "blindfold") {
-    return `<rect x="36" y="48" width="56" height="18" fill="${accent}" />`;
-  }
-  return "";
+function avatarImageSrc(avatar) {
+  return avatar?.src || avatarDataUri(avatar);
 }
 
 async function persistAvatarChoice(avatarId) {
@@ -1399,6 +1395,7 @@ function openAuthModal(mode = "login") {
   if (mode === true) mode = "settings";
   if (mode === false) mode = "login";
   authModalMode = mode === "settings" || mode === "signup" ? mode : "login";
+  closeSettingsPanels();
   el.authModal.removeAttribute("hidden");
   renderAuthUI();
 }
@@ -1677,6 +1674,48 @@ function formatShortDate(value) {
   }).format(new Date(parsed));
 }
 
+function setPosterImage(image, item) {
+  if (!image) return;
+  const fallback = buildPosterPlaceholder(item?.title);
+  image.loading = "eager";
+  image.decoding = "async";
+  image.onerror = () => {
+    image.onerror = null;
+    image.src = fallback;
+  };
+  image.src = item?.poster || fallback;
+}
+
+function buildPosterPlaceholder(title) {
+  const safeTitle = escapeHtml(String(title || "Cinerune").slice(0, 28));
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
+      <defs>
+        <linearGradient id="poster-bg" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#123a5c" />
+          <stop offset="100%" stop-color="#071528" />
+        </linearGradient>
+      </defs>
+      <rect width="300" height="450" fill="url(#poster-bg)" />
+      <rect x="22" y="22" width="256" height="406" rx="18" fill="rgba(255,255,255,0.045)" stroke="rgba(126,216,255,0.18)" />
+      <text x="150" y="214" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="20" font-weight="700" text-anchor="middle">${safeTitle}</text>
+      <text x="150" y="246" fill="#9fb6d0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">Poster loading unavailable</text>
+    </svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function formatTimeAgo(value) {
+  const parsed = Date.parse(`${String(value || "").trim()}T00:00:00`);
+  if (!Number.isFinite(parsed)) return "";
+  const diffMs = Math.max(0, Date.now() - parsed);
+  const hours = Math.max(1, Math.floor(diffMs / 3600000));
+  if (hours < 48) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
 function debounce(fn, wait) {
   let timer = null;
   return (...args) => {
@@ -1790,4 +1829,65 @@ function openMegaMenu() {
 function closeMegaMenu() {
   if (!el.megaMenuPanel) return;
   el.megaMenuPanel.setAttribute("hidden", "");
+}
+
+function avatarDataUri(avatar) {
+  const safeLabel = escapeHtml(avatar.label);
+  const safeBg1 = escapeHtml(avatar.bg1);
+  const safeBg2 = escapeHtml(avatar.bg2);
+  const safeSkin = escapeHtml(avatar.skin);
+  const safeHair = escapeHtml(avatar.hair);
+  const safeShirt = escapeHtml(avatar.shirt);
+  const safeEyes = escapeHtml(avatar.eyes);
+  const safeAccent = escapeHtml(avatar.accent);
+  const backHair = avatarBackHairSvg(avatar.hairStyle, safeHair);
+  const frontHair = avatarFrontHairSvg(avatar.hairStyle, safeHair);
+  const accessory = avatarAccessorySvg(avatar.accessory, safeAccent, safeEyes);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}">
+      <defs><linearGradient id="bg-${avatar.id}" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="${safeBg1}" /><stop offset="100%" stop-color="${safeBg2}" /></linearGradient></defs>
+      <rect width="128" height="128" rx="32" fill="url(#bg-${avatar.id})" />
+      ${backHair}
+      <path d="M 24 128 C 24 96 104 96 104 128" fill="${safeShirt}" />
+      <path d="M 44 128 C 44 104 84 104 84 128" fill="rgba(255,255,255,0.15)" />
+      <rect x="54" y="70" width="20" height="24" rx="8" fill="${safeSkin}" />
+      <rect x="54" y="78" width="20" height="12" fill="rgba(0,0,0,0.1)" />
+      <rect x="36" y="28" width="56" height="60" rx="26" fill="${safeSkin}" />
+      ${frontHair}
+      <circle cx="50" cy="58" r="4" fill="${safeEyes}" />
+      <circle cx="78" cy="58" r="4" fill="${safeEyes}" />
+      <circle cx="42" cy="66" r="5" fill="#ff0000" opacity="0.12" />
+      <circle cx="86" cy="66" r="5" fill="#ff0000" opacity="0.12" />
+      <path d="M 58 68 Q 64 74 70 68" stroke="${safeEyes}" stroke-width="3" stroke-linecap="round" fill="none" />
+      ${accessory}
+    </svg>`.replace(/\s+/g, " ").trim();
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function avatarBackHairSvg(style, color) {
+  if (style === "bald") return "";
+  if (style === "spiky") return `<path d="M 24 60 L 16 40 L 32 32 L 40 12 L 64 6 L 88 12 L 96 32 L 112 40 L 104 60 Z" fill="${color}" />`;
+  if (style === "long") return `<rect x="32" y="40" width="64" height="60" rx="16" fill="${color}" /><path d="M 32 80 L 32 110 C 32 120 44 120 44 110 L 44 80 Z" fill="${color}" /><path d="M 96 80 L 96 110 C 96 120 84 120 84 110 L 84 80 Z" fill="${color}" />`;
+  if (style === "bun") return `<circle cx="64" cy="18" r="14" fill="${color}" />`;
+  if (style === "bob") return `<rect x="30" y="36" width="68" height="48" rx="20" fill="${color}" />`;
+  return "";
+}
+
+function avatarFrontHairSvg(style, color) {
+  if (style === "bald") return "";
+  if (style === "spiky") return `<path d="M 32 52 L 36 26 L 48 38 L 54 18 L 64 36 L 74 18 L 80 38 L 92 26 L 96 52 Z" fill="${color}" />`;
+  if (style === "short") return `<path d="M 32 52 C 32 16 96 16 96 52 C 96 58 84 46 64 42 C 44 38 32 58 32 52 Z" fill="${color}" />`;
+  if (style === "long" || style === "bun") return `<path d="M 36 46 C 36 20 92 20 92 46 Q 78 34 64 34 Q 50 34 36 46 Z" fill="${color}" />`;
+  if (style === "bob") return `<path d="M 36 48 C 36 20 92 20 92 48 Q 78 34 64 34 Q 50 34 36 48 Z" fill="${color}" />`;
+  return "";
+}
+
+function avatarAccessorySvg(accessory, accent, eyes) {
+  if (accessory === "headband") return `<rect x="36" y="36" width="56" height="12" fill="${accent}" /><rect x="52" y="38" width="24" height="8" rx="2" fill="#ddd" />`;
+  if (accessory === "strawhat") return `<ellipse cx="64" cy="32" rx="46" ry="12" fill="${accent}" /><path d="M 42 30 C 42 8 86 8 86 30 Z" fill="${accent}" /><path d="M 43 26 C 43 28 85 28 85 26 Z" fill="#e03131" stroke="#e03131" stroke-width="3" />`;
+  if (accessory === "glasses_scar" || accessory === "glasses_goatee") return `<rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" /><rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" /><line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />`;
+  if (accessory === "blindfold") return `<rect x="36" y="48" width="56" height="18" fill="${accent}" />`;
+  if (accessory === "earring") return `<circle cx="34" cy="64" r="4" fill="${accent}" /><circle cx="94" cy="64" r="4" fill="${accent}" />`;
+  if (accessory === "star") return `<path d="M 82 32 L 84 38 L 90 38 L 85 42 L 87 48 L 82 44 L 77 48 L 79 42 L 74 38 L 80 38 Z" fill="${accent}" />`;
+  return "";
 }

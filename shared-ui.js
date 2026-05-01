@@ -1,18 +1,12 @@
 import { clearStoredSession, ensureSession } from "./auth-client.js";
 
 const avatarOptions = [
-  { id: "ninja", label: "Ninja Boy", bg1: "#ff9900", bg2: "#d32f2f", skin: "#ffdfbd", hair: "#ffdd00", shirt: "#ff6600", eyes: "#3b5998", accent: "#003366", hairStyle: "spiky", accessory: "headband" },
-  { id: "pirate", label: "Pirate King", bg1: "#4dabf7", bg2: "#1864ab", skin: "#f1c27d", hair: "#111111", shirt: "#e03131", eyes: "#111111", accent: "#f5c518", hairStyle: "short", accessory: "strawhat" },
-  { id: "wizard", label: "Chosen Wizard", bg1: "#660000", bg2: "#220000", skin: "#ffe0c2", hair: "#2c1b18", shirt: "#333333", eyes: "#296d39", accent: "#ffd700", hairStyle: "short", accessory: "glasses_scar" },
-  { id: "spider", label: "Web Slinger", bg1: "#e03131", bg2: "#0b7285", skin: "#f3d2bb", hair: "#4d331f", shirt: "#c92a2a", eyes: "#5c3a21", accent: "#1864ab", hairStyle: "short", accessory: "none" },
-  { id: "jinx", label: "Chaos Girl", bg1: "#c8a7ff", bg2: "#862e9c", skin: "#fdf0f5", hair: "#22b8cf", shirt: "#212529", eyes: "#e64980", accent: "#333", hairStyle: "long", accessory: "none" },
-  { id: "wednesday", label: "Goth Girl", bg1: "#495057", bg2: "#212529", skin: "#f8f9fa", hair: "#111", shirt: "#111", eyes: "#111", accent: "#fff", hairStyle: "long", accessory: "none" },
-  { id: "chemist", label: "The Chemist", bg1: "#b2f2bb", bg2: "#08b361", skin: "#ffdfbd", hair: "#111", shirt: "#2f9e44", eyes: "#111", accent: "#a67c52", hairStyle: "bald", accessory: "glasses_goatee" },
-  { id: "sailor", label: "Moon Princess", bg1: "#ffb8cb", bg2: "#c2255c", skin: "#ffe3e3", hair: "#ffd43b", shirt: "#f8f9fa", eyes: "#1c7ed6", accent: "#fcc419", hairStyle: "bun", accessory: "star" },
-  { id: "sorcerer", label: "Blindfold Sorcerer", bg1: "#3b5bdb", bg2: "#1864ab", skin: "#f8f9fa", hair: "#e9ecef", shirt: "#111", eyes: "#666", accent: "#111", hairStyle: "spiky", accessory: "blindfold" },
-  { id: "slayer", label: "Demon Hunter", bg1: "#b2f2bb", bg2: "#2b8a3e", skin: "#f1c27d", hair: "#8b0000", shirt: "#2b8a3e", eyes: "#8b0000", accent: "#f1c27d", hairStyle: "spiky", accessory: "earring" },
-  { id: "spy", label: "Telepath Girl", bg1: "#ffc9c9", bg2: "#e64980", skin: "#ffe3e3", hair: "#ffb8cb", shirt: "#212529", eyes: "#2b8a3e", accent: "#111", hairStyle: "bob", accessory: "none" },
-  { id: "saiyan", label: "Super Warrior", bg1: "#ffec99", bg2: "#e8590c", skin: "#f1c27d", hair: "#111", shirt: "#f08c00", eyes: "#111", accent: "#111", hairStyle: "spiky", accessory: "none" }
+  { id: "luffy", label: "Monkey D. Luffy", src: "https://avatarfiles.alphacoders.com/141/141955.png" },
+  { id: "naruto", label: "Naruto Uzumaki", src: "https://avatarfiles.alphacoders.com/106/106708.jpg" },
+  { id: "goku", label: "Goku", src: "https://avatarfiles.alphacoders.com/263/263487.png" },
+  { id: "spider", label: "Spider-Man", src: "https://avatarfiles.alphacoders.com/254/254569.jpg" },
+  { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" },
+  { id: "spider-art", label: "Spider-Man Art", src: "https://avatarfiles.alphacoders.com/375/375895.png" }
 ];
 
 export function initSharedHeader() {
@@ -77,10 +71,10 @@ export function initSharedHeader() {
 }
 
 function renderSharedAccount(avatarEl, labelEl, session) {
-  const avatarId = normalizeAvatarId(session?.user?.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "ninja"));
+  const avatarId = normalizeAvatarId(session?.user?.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "luffy"));
   if (avatarEl) {
     const avatar = avatarOptions.find((option) => option.id === avatarId) || avatarOptions[0];
-    avatarEl.src = avatarDataUri(avatar);
+    avatarEl.src = avatarSrcById(avatar.id);
     avatarEl.alt = `${avatar.label} avatar`;
   }
   if (labelEl) {
@@ -89,13 +83,13 @@ function renderSharedAccount(avatarEl, labelEl, session) {
 }
 
 export function normalizeAvatarId(value) {
-  const fallback = avatarOptions[0]?.id || "ninja";
+  const fallback = avatarOptions[0]?.id || "luffy";
   return avatarOptions.some((option) => option.id === value) ? value : fallback;
 }
 
 export function avatarSrcById(value) {
   const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(value)) || avatarOptions[0];
-  return avatarDataUri(avatar);
+  return avatar?.src || avatarDataUri(avatar);
 }
 
 export function avatarDataUri(avatar) {

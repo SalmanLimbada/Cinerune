@@ -109,7 +109,10 @@ async function handleAuthLogin(request, env) {
     });
   }
 
-  const email = identifier.includes("@") ? identifier : `${identifier}@cinerune.user`;
+  const email = await resolveLoginEmail(env, identifier);
+  if (!email) {
+    return jsonResponse({ error: "Invalid credentials." }, 400);
+  }
   return proxySupabaseAuth(env, "/auth/v1/token?grant_type=password", {
     email,
     password
@@ -123,10 +126,11 @@ async function handleAuthSignup(request, env) {
 
   const payload = await readJson(request);
   const username = normalizeUsername(payload?.username);
+  const email = normalizeEmail(payload?.email, true);
   const password = String(payload?.password || "");
   const avatarId = normalizeAvatarId(payload?.avatarId);
 
-  if (!username || !isValidPassword(password)) {
+  if (!username || email === null || !isValidPassword(password)) {
     return jsonResponse({ error: "Invalid sign up details." }, 400);
   }
 
@@ -138,11 +142,20 @@ async function handleAuthSignup(request, env) {
     });
   }
 
-  return proxySupabaseAuth(env, "/auth/v1/signup", {
-    email: `${username}@cinerune.user`,
+  const loginEmail = email || internalEmailForUsername(username);
+  const response = await proxySupabaseAuth(env, "/auth/v1/signup", {
+    email: loginEmail,
     password,
-    data: { username, avatarId }
+    data: {
+      username,
+      avatarId,
+      email: email || undefined
+    }
   });
+  if (response.ok) {
+    await storeLoginAliases(env, username, loginEmail);
+  }
+  return response;
 }
 
 async function handleAuthRefresh(request, env) {
@@ -184,10 +197,17 @@ async function handleAuthUpdate(request, env) {
     return jsonResponse({ error: "Missing token." }, 401);
   }
 
+  const currentUser = await fetchSupabaseUser(env, token);
+  if (!currentUser?.id) {
+    return jsonResponse({ error: "Could not verify user." }, 401);
+  }
+
   const payload = await readJson(request);
   const avatarId = payload?.avatarId === undefined ? "" : normalizeAvatarId(payload?.avatarId);
   const username = payload?.username === undefined ? "" : normalizeUsername(payload?.username);
+  const email = payload?.email === undefined ? undefined : normalizeEmail(payload?.email, false);
   const password = payload?.password === undefined ? "" : String(payload?.password || "");
+  const currentPassword = String(payload?.currentPassword || "");
 
   const update = {};
   const data = {};
@@ -200,11 +220,22 @@ async function handleAuthUpdate(request, env) {
   if (payload?.username !== undefined) {
     if (!username) return jsonResponse({ error: "Invalid username." }, 400);
     data.username = username;
-    update.email = `${username}@cinerune.user`;
+    if (isInternalEmail(currentUser.email)) {
+      update.email = internalEmailForUsername(username);
+    }
+  }
+
+  if (payload?.email !== undefined) {
+    if (!email) return jsonResponse({ error: "Invalid email." }, 400);
+    update.email = email;
+    data.email = email;
   }
 
   if (payload?.password !== undefined) {
     if (!isValidPassword(password)) return jsonResponse({ error: "Invalid password." }, 400);
+    if (!isValidPassword(currentPassword)) return jsonResponse({ error: "Enter your old password." }, 400);
+    const verified = await verifyCurrentPassword(env, currentUser.email, currentPassword);
+    if (!verified) return jsonResponse({ error: "Old password is incorrect." }, 403);
     update.password = password;
   }
 
@@ -216,7 +247,15 @@ async function handleAuthUpdate(request, env) {
     return jsonResponse({ error: "Invalid payload." }, 400);
   }
 
-  return proxySupabaseAuth(env, "/auth/v1/user", update, token, "PUT");
+  const response = await proxySupabaseAuth(env, "/auth/v1/user", update, token, "PUT");
+  if (response.ok && (username || update.email)) {
+    await storeLoginAliases(
+      env,
+      username || currentUser.user_metadata?.username,
+      update.email || currentUser.email
+    );
+  }
+  return response;
 }
 
 async function handleProgressPull(request, env, url) {
@@ -331,6 +370,53 @@ async function proxySupabaseAuth(env, path, payload, token, method = "POST") {
   return proxyJson(response);
 }
 
+async function fetchSupabaseUser(env, token) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY || !token) return null;
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json"
+    }
+  });
+  if (!response.ok) return null;
+  return response.json();
+}
+
+async function verifyCurrentPassword(env, email, password) {
+  if (!email || !password) return false;
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email, password })
+  });
+  return response.ok;
+}
+
+async function resolveLoginEmail(env, identifier) {
+  if (!identifier) return "";
+  if (identifier.includes("@")) return identifier;
+
+  const key = loginAliasKey(identifier);
+  const mapped = env.RATE_LIMIT_KV?.get ? await env.RATE_LIMIT_KV.get(key) : "";
+  return mapped || internalEmailForUsername(identifier);
+}
+
+async function storeLoginAliases(env, username, email) {
+  const normalizedUsername = normalizeUsername(username);
+  const normalizedEmail = normalizeEmail(email, false);
+  if (!env.RATE_LIMIT_KV?.put || !normalizedUsername || !normalizedEmail) return;
+  await env.RATE_LIMIT_KV.put(loginAliasKey(normalizedUsername), normalizedEmail);
+}
+
+function loginAliasKey(username) {
+  return `login:username:${username}`;
+}
+
 function supabaseHeaders(env, token) {
   return {
     apikey: env.SUPABASE_ANON_KEY,
@@ -357,6 +443,21 @@ function normalizeIdentifier(value) {
 function normalizeUsername(value) {
   const trimmed = String(value || "").trim().toLowerCase();
   return /^[a-z0-9._-]{3,24}$/.test(trimmed) ? trimmed : "";
+}
+
+function normalizeEmail(value, allowBlank = false) {
+  const trimmed = String(value || "").trim().toLowerCase();
+  if (!trimmed) return allowBlank ? "" : null;
+  if (trimmed.length > 80) return null;
+  return /.+@.+\..+/.test(trimmed) ? trimmed : null;
+}
+
+function internalEmailForUsername(username) {
+  return `${username}@cinerune.user`;
+}
+
+function isInternalEmail(email) {
+  return String(email || "").toLowerCase().endsWith("@cinerune.user");
 }
 
 function normalizeAvatarId(value) {
