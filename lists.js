@@ -4,7 +4,7 @@ import {
   titleById,
   posterById,
   isSensitiveCatalogItem
-} from "./catalog.js?v=20260501-fallback";
+} from "./catalog.js?v=20260501-fix1";
 import { ensureSession } from "./auth-client.js";
 import { initSharedHeader } from "./shared-ui.js";
 
@@ -282,4 +282,13 @@ function readJson(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }

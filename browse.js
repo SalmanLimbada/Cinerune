@@ -4,7 +4,7 @@ import {
   fetchCountryOptions,
   fetchTitlesByGenre,
   fetchTitlesByCountry
-} from "./catalog.js?v=20260501-fallback";
+} from "./catalog.js?v=20260501-fix1";
 import { initSharedHeader } from "./shared-ui.js";
 
 const query = new URLSearchParams(window.location.search);

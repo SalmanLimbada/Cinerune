@@ -1,7 +1,7 @@
 import {
   initTmdb,
   searchCatalog
-} from "./catalog.js?v=20260501-fallback";
+} from "./catalog.js?v=20260501-fix1";
 import { initSharedHeader } from "./shared-ui.js";
 
 const query = new URLSearchParams(window.location.search);
@@ -171,4 +171,13 @@ function buildPagerPages(current, total) {
   if (total > 1) pages.push({ type: "page", page: total, label: String(total) });
 
   return pages;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }

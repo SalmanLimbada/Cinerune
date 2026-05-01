@@ -1,6 +1,6 @@
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
-const MAX_BODY_BYTES = 4096;
+const MAX_BODY_BYTES = 65536;
 
 export default {
   async fetch(request, env) {
@@ -58,7 +58,9 @@ export default {
 
       return withCors(jsonResponse({ error: "Not found" }, 404), origin);
     } catch (error) {
-      return withCors(jsonResponse({ error: error?.message || "Server error" }, 500), origin);
+      const message = error?.message || "Server error";
+      const status = message === "Payload too large" ? 413 : 500;
+      return withCors(jsonResponse({ error: message }, status), origin);
     }
   }
 };

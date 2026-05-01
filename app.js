@@ -1,5 +1,5 @@
 import { apiRequest, authHeaders, ensureSession, setStoredSession, clearStoredSession } from "./auth-client.js";
-import * as catalogApi from "./catalog.js?v=20260501-fallback";
+import * as catalogApi from "./catalog.js?v=20260501-fix1";
 
 const initTmdb = catalogApi.initTmdb;
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
@@ -1432,11 +1432,13 @@ async function syncProgressToCloud() {
   }
 
   try {
-    await apiRequest("/progress/push", {
-      method: "POST",
-      headers: authHeaders(session),
-      body: { rows }
-    });
+    for (let index = 0; index < rows.length; index += 15) {
+      await apiRequest("/progress/push", {
+        method: "POST",
+        headers: authHeaders(session),
+        body: { rows: rows.slice(index, index + 15) }
+      });
+    }
   } catch {
     setStatus("Could not save progress right now.");
     return;

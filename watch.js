@@ -9,7 +9,7 @@ import {
   seasonCount,
   titleById,
   posterById
-} from "./catalog.js?v=20260501-fallback";
+} from "./catalog.js?v=20260501-fix1";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const settingsKey = "cinerune:settings";
@@ -796,11 +796,13 @@ async function syncProgressToCloud() {
   }
 
   try {
-    await apiRequest("/progress/push", {
-      method: "POST",
-      headers: authHeaders(session),
-      body: { rows }
-    });
+    for (let index = 0; index < rows.length; index += 15) {
+      await apiRequest("/progress/push", {
+        method: "POST",
+        headers: authHeaders(session),
+        body: { rows: rows.slice(index, index + 15) }
+      });
+    }
   } catch (error) {
     // Don't surface technical sync errors to the user; log for debugging instead.
     console.warn("Sync failed:", error);
@@ -852,6 +854,15 @@ function readJson(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function formatSeconds(value) {
