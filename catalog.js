@@ -2,7 +2,8 @@ let tmdbConfig = {
   apiKey: "",
   readAccessToken: "",
   language: "en-US",
-  apiBase: ""
+  apiBase: "",
+  fallbackApiBase: ""
 };
 
 const itemCache = new Map();
@@ -71,7 +72,8 @@ export function initTmdb(config = {}) {
     apiKey: String(config.apiKey || "").trim(),
     readAccessToken: String(config.readAccessToken || "").trim(),
     language: String(config.language || "en-US").trim() || "en-US",
-    apiBase: String(config.apiBase || "").trim()
+    apiBase: String(config.apiBase || "").trim(),
+    fallbackApiBase: String(config.fallbackApiBase || "").trim()
   };
 }
 
@@ -625,9 +627,49 @@ async function tmdbRequest(path, params = {}) {
     throw new Error("TMDB config missing");
   }
 
-  const base = hasProxy
-    ? tmdbConfig.apiBase.replace(/\/+$/, "")
-    : "https://api.themoviedb.org/3";
+  const base = hasProxy ? normalizeApiBase(tmdbConfig.apiBase) : "https://api.themoviedb.org/3";
+  const fallbackBase = hasProxy ? normalizeApiBase(tmdbConfig.fallbackApiBase) : "";
+  const fallbackEnabled = fallbackBase && fallbackBase !== base;
+  const url = buildTmdbUrl(base, path, params, hasProxy);
+
+  const headers = { Accept: "application/json" };
+  if (!hasProxy && tmdbConfig.readAccessToken) {
+    headers.Authorization = `Bearer ${tmdbConfig.readAccessToken}`;
+  }
+
+  let response;
+  try {
+    response = await fetch(url.toString(), {
+      headers,
+      cache: "no-store"
+    });
+  } catch (error) {
+    if (!fallbackEnabled) throw error;
+    response = await fetch(buildTmdbUrl(fallbackBase, path, params, true).toString(), {
+      headers: { Accept: "application/json" },
+      cache: "no-store"
+    });
+  }
+
+  if (!response.ok && fallbackEnabled) {
+    response = await fetch(buildTmdbUrl(fallbackBase, path, params, true).toString(), {
+      headers: { Accept: "application/json" },
+      cache: "no-store"
+    });
+  }
+
+  if (!response.ok) {
+    throw new Error(`TMDB request failed (${response.status})`);
+  }
+
+  return response.json();
+}
+
+function normalizeApiBase(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function buildTmdbUrl(base, path, params, hasProxy) {
   const url = new URL(`${base}${hasProxy ? "/api/tmdb" : ""}${path}`);
   url.searchParams.set("language", tmdbConfig.language);
   if (!hasProxy && tmdbConfig.apiKey) {
@@ -640,21 +682,7 @@ async function tmdbRequest(path, params = {}) {
     }
   });
 
-  const headers = { Accept: "application/json" };
-  if (!hasProxy && tmdbConfig.readAccessToken) {
-    headers.Authorization = `Bearer ${tmdbConfig.readAccessToken}`;
-  }
-
-  const response = await fetch(url.toString(), {
-    headers,
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    throw new Error(`TMDB request failed (${response.status})`);
-  }
-
-  return response.json();
+  return url;
 }
 
 async function fetchGenres(mediaType) {

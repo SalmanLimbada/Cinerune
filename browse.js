@@ -4,7 +4,7 @@ import {
   fetchCountryOptions,
   fetchTitlesByGenre,
   fetchTitlesByCountry
-} from "./catalog.js?v=20260501-stable";
+} from "./catalog.js?v=20260501-fallback";
 import { initSharedHeader } from "./shared-ui.js";
 
 const query = new URLSearchParams(window.location.search);
@@ -33,6 +33,7 @@ async function boot() {
   initSharedHeader();
   initTmdb({
     apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
+    fallbackApiBase: String(window.CINERUNE_CONFIG?.fallbackApiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 

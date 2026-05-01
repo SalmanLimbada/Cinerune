@@ -4,7 +4,7 @@ import {
   titleById,
   posterById,
   isSensitiveCatalogItem
-} from "./catalog.js?v=20260501-stable";
+} from "./catalog.js?v=20260501-fallback";
 import { ensureSession } from "./auth-client.js";
 import { initSharedHeader } from "./shared-ui.js";
 
@@ -40,6 +40,7 @@ async function boot() {
   initSharedHeader();
   initTmdb({
     apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
+    fallbackApiBase: String(window.CINERUNE_CONFIG?.fallbackApiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 

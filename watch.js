@@ -9,7 +9,7 @@ import {
   seasonCount,
   titleById,
   posterById
-} from "./catalog.js?v=20260501-stable";
+} from "./catalog.js?v=20260501-fallback";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const settingsKey = "cinerune:settings";
@@ -106,6 +106,7 @@ async function boot() {
   syncProgressState();
   initTmdb({
     apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
+    fallbackApiBase: String(window.CINERUNE_CONFIG?.fallbackApiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 

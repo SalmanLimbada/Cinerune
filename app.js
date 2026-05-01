@@ -1,5 +1,5 @@
 import { apiRequest, authHeaders, ensureSession, setStoredSession, clearStoredSession } from "./auth-client.js";
-import * as catalogApi from "./catalog.js?v=20260501-stable";
+import * as catalogApi from "./catalog.js?v=20260501-fallback";
 
 const initTmdb = catalogApi.initTmdb;
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
@@ -160,6 +160,7 @@ async function boot() {
 
   initTmdb({
     apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
+    fallbackApiBase: String(window.CINERUNE_CONFIG?.fallbackApiBase || "").trim(),
     language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
   });
 
