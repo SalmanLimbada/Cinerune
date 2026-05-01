@@ -647,7 +647,7 @@ async function tmdbRequest(path, params = {}) {
 
   const response = await fetch(url.toString(), {
     headers,
-    cache: "force-cache"
+    cache: "no-store"
   });
 
   if (!response.ok) {

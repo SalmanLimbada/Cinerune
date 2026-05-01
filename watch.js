@@ -1,5 +1,5 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession } from "./auth-client.js";
-import { avatarSrcById, normalizeAvatarId } from "./shared-ui.js";
+import { avatarDataUri, avatarSrcById, normalizeAvatarId } from "./shared-ui.js";
 import {
   initTmdb,
   fetchItemDetailsById,
@@ -9,7 +9,7 @@ import {
   seasonCount,
   titleById,
   posterById
-} from "./catalog.js?v=20260430-search";
+} from "./catalog.js?v=20260501-stable";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const settingsKey = "cinerune:settings";
@@ -725,18 +725,18 @@ function renderWatchAccountUI() {
   if (!el.watchAccountBtn) return;
 
   if (state.session?.user) {
-    const avatarId = normalizeAvatarId(state.session.user.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "ninja"));
+    const avatarId = normalizeAvatarId(state.session.user.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "luffy"));
     if (el.watchAccountAvatar) {
-      el.watchAccountAvatar.src = avatarSrcById(avatarId);
+      setAccountAvatarImage(el.watchAccountAvatar, avatarId);
       el.watchAccountAvatar.alt = "Selected avatar";
     }
     if (el.watchAccountLabel) el.watchAccountLabel.textContent = "Account";
     el.watchAccountBtn.classList.add("active");
     if (el.watchListsLink) el.watchListsLink.removeAttribute("hidden");
   } else {
-    const avatarId = normalizeAvatarId(readJson("cinerune:avatar-choice", "ninja"));
+    const avatarId = normalizeAvatarId(readJson("cinerune:avatar-choice", "luffy"));
     if (el.watchAccountAvatar) {
-      el.watchAccountAvatar.src = avatarSrcById(avatarId);
+      setAccountAvatarImage(el.watchAccountAvatar, avatarId);
       el.watchAccountAvatar.alt = "Selected avatar";
     }
     if (el.watchAccountLabel) el.watchAccountLabel.textContent = "Login";
@@ -744,6 +744,15 @@ function renderWatchAccountUI() {
     closeWatchAccountMenu();
     if (el.watchListsLink) el.watchListsLink.setAttribute("hidden", "");
   }
+}
+
+function setAccountAvatarImage(image, avatarId) {
+  image.referrerPolicy = "no-referrer";
+  image.onerror = () => {
+    image.onerror = null;
+    image.src = avatarDataUri({ id: avatarId, label: "Selected avatar" });
+  };
+  image.src = avatarSrcById(avatarId);
 }
 
 

@@ -1,7 +1,7 @@
 import {
   initTmdb,
   fetchTopRated
-} from "./catalog.js?v=20260430-search";
+} from "./catalog.js?v=20260501-stable";
 import { initSharedHeader } from "./shared-ui.js";
 
 const query = new URLSearchParams(window.location.search);

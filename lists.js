@@ -4,7 +4,7 @@ import {
   titleById,
   posterById,
   isSensitiveCatalogItem
-} from "./catalog.js?v=20260430-search";
+} from "./catalog.js?v=20260501-stable";
 import { ensureSession } from "./auth-client.js";
 import { initSharedHeader } from "./shared-ui.js";
 
@@ -19,7 +19,7 @@ function getBookmarksKey(session) {
 }
 
 const el = {
-  listsStatus: document.getElementById("listsStatus"),
+  bookmarksStatus: document.getElementById("bookmarksStatus"),
   listsTitle: document.getElementById("listsTitle"),
   continueListSection: document.getElementById("continueListSection"),
   listContinue: document.getElementById("listContinue"),
@@ -55,7 +55,7 @@ async function boot() {
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
   if (!bookmarks.length) {
-    el.listsStatus.textContent = "No saved titles yet.";
+    el.bookmarksStatus.textContent = "No saved titles yet.";
     renderEmpty(el.listWatching);
     renderEmpty(el.listWatched);
     renderEmpty(el.listPlan);
@@ -70,7 +70,7 @@ async function boot() {
   renderList(el.listPlan, hydrated.filter((item) => item.status === "plan"));
   renderList(el.listDropped, hydrated.filter((item) => item.status === "dropped"));
 
-  el.listsStatus.textContent = `${hydrated.length} saved title${hydrated.length === 1 ? "" : "s"}.`;
+  el.bookmarksStatus.textContent = `${hydrated.length} saved title${hydrated.length === 1 ? "" : "s"}.`;
 }
 
 async function renderContinuePage() {
@@ -82,7 +82,7 @@ async function renderContinuePage() {
     .filter((entry) => Number(entry.timestamp || 0) > 20 && Number(entry.progress || 0) < 98));
 
   if (!entries.length) {
-    el.listsStatus.textContent = "No continue watching titles yet.";
+    el.bookmarksStatus.textContent = "No continue watching titles yet.";
     renderEmpty(el.listContinue);
     return;
   }
@@ -90,7 +90,7 @@ async function renderContinuePage() {
   const hydrated = (await hydrateProgressEntries(entries)).filter((item) => !isSensitiveCatalogItem(item));
   el.continueListSection?.removeAttribute("hidden");
   renderList(el.listContinue, hydrated, { resume: true });
-  el.listsStatus.textContent = `${hydrated.length} title${hydrated.length === 1 ? "" : "s"} in progress.`;
+  el.bookmarksStatus.textContent = `${hydrated.length} title${hydrated.length === 1 ? "" : "s"} in progress.`;
 }
 
 async function initAuth() {

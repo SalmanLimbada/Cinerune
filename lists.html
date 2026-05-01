@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Lists | Cinerune</title>
-    <meta name="description" content="Cinerune saved lists" />
+    <title>Bookmarks | Cinerune</title>
+    <meta name="description" content="Cinerune saved bookmarks" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
@@ -34,7 +34,7 @@
         </button>
         <div id="accountMenu" class="account-menu" hidden>
           <a class="account-menu-item" href="./index.html?modal=settings">Settings</a>
-          <a class="account-menu-item" href="./lists.html">My Lists</a>
+          <a class="account-menu-item" href="./lists.html">Bookmarks</a>
           <a class="account-menu-item" href="./lists.html?view=continue">Continue Watching</a>
           <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">Sign Out</button>
         </div>
@@ -44,9 +44,9 @@
     <main class="lists-shell">
       <section class="home-row">
         <div class="row-head">
-          <h2 id="listsTitle">My Lists</h2>
+          <h2 id="listsTitle">Bookmarks</h2>
         </div>
-        <p id="listsStatus" class="tiny muted">Loading your saved titles...</p>
+        <p id="bookmarksStatus" class="tiny muted">Loading your saved titles...</p>
       </section>
 
       <section id="continueListSection" class="lists-section" hidden>
@@ -101,6 +101,6 @@
         document.head.appendChild(script);
       })();
     </script>
-    <script type="module" src="lists.js?v=20260430-fix"></script>
+    <script type="module" src="lists.js?v=20260501-stable"></script>
   </body>
 </html>

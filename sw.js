@@ -1,9 +1,9 @@
-const STATIC_CACHE = "cinerune-static-v23";
+const STATIC_CACHE = "cinerune-static-v24";
 const ASSETS = ["./", "./index.html", "./watch.html", "./lists.html", "./browse.html", "./search.html", "./top-rated.html", "./styles.css", "./app.js", "./watch.js", "./lists.js", "./browse.js", "./search.js", "./top-rated.js", "./shared-ui.js", "./auth-client.js", "./catalog.js", "./config.js", "./favicon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => cache.addAll(ASSETS))
+    caches.open(STATIC_CACHE).then((cache) => cache.addAll(ASSETS).catch(() => undefined))
   );
   self.skipWaiting();
 });
@@ -33,7 +33,7 @@ self.addEventListener("fetch", (event) => {
 
     if (networkFirst) {
       event.respondWith(
-        fetch(request)
+        fetch(request, { cache: "no-store" })
           .then((response) => {
             const copy = response.clone();
             caches.open(STATIC_CACHE).then((cache) => cache.put(request, copy));
@@ -46,7 +46,7 @@ self.addEventListener("fetch", (event) => {
 
     event.respondWith(
       caches.match(request).then((cached) => {
-        const network = fetch(request)
+        const network = fetch(request, { cache: "no-store" })
           .then((response) => {
             const copy = response.clone();
             caches.open(STATIC_CACHE).then((cache) => cache.put(request, copy));

@@ -5,8 +5,7 @@ const avatarOptions = [
   { id: "naruto", label: "Naruto Uzumaki", src: "https://avatarfiles.alphacoders.com/106/106708.jpg" },
   { id: "goku", label: "Goku", src: "https://avatarfiles.alphacoders.com/263/263487.png" },
   { id: "spider", label: "Spider-Man", src: "https://avatarfiles.alphacoders.com/254/254569.jpg" },
-  { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" },
-  { id: "spider-art", label: "Spider-Man Art", src: "https://avatarfiles.alphacoders.com/375/375895.png" }
+  { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" }
 ];
 
 export function initSharedHeader() {
@@ -74,6 +73,11 @@ function renderSharedAccount(avatarEl, labelEl, session) {
   const avatarId = normalizeAvatarId(session?.user?.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "luffy"));
   if (avatarEl) {
     const avatar = avatarOptions.find((option) => option.id === avatarId) || avatarOptions[0];
+    avatarEl.referrerPolicy = "no-referrer";
+    avatarEl.onerror = () => {
+      avatarEl.onerror = null;
+      avatarEl.src = avatarDataUri(avatar);
+    };
     avatarEl.src = avatarSrcById(avatar.id);
     avatarEl.alt = `${avatar.label} avatar`;
   }
@@ -93,6 +97,12 @@ export function avatarSrcById(value) {
 }
 
 export function avatarDataUri(avatar) {
+  if (!avatar?.bg1) {
+    const safeLabel = escapeHtml(avatar?.label || "Avatar");
+    const initials = escapeHtml(String(avatar?.label || "AV").split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase() || "AV");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#179de5"/><stop offset="100%" stop-color="#071528"/></linearGradient></defs><rect width="128" height="128" rx="32" fill="url(#g)"/><text x="64" y="73" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="34" font-weight="800" text-anchor="middle">${initials}</text></svg>`;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  }
   const safeLabel = escapeHtml(avatar.label);
   const safeBg1 = escapeHtml(avatar.bg1);
   const safeBg2 = escapeHtml(avatar.bg2);

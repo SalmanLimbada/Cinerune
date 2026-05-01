@@ -1,5 +1,5 @@
 import { apiRequest, authHeaders, ensureSession, setStoredSession, clearStoredSession } from "./auth-client.js";
-import * as catalogApi from "./catalog.js?v=20260430-search";
+import * as catalogApi from "./catalog.js?v=20260501-stable";
 
 const initTmdb = catalogApi.initTmdb;
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
@@ -30,8 +30,7 @@ const avatarOptions = [
   { id: "naruto", label: "Naruto Uzumaki", src: "https://avatarfiles.alphacoders.com/106/106708.jpg" },
   { id: "goku", label: "Goku", src: "https://avatarfiles.alphacoders.com/263/263487.png" },
   { id: "spider", label: "Spider-Man", src: "https://avatarfiles.alphacoders.com/254/254569.jpg" },
-  { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" },
-  { id: "spider-art", label: "Spider-Man Art", src: "https://avatarfiles.alphacoders.com/375/375895.png" }
+  { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" }
 ];
 
 const el = {
@@ -1310,7 +1309,7 @@ function renderAvatarPickers() {
   containers.forEach((container) => {
     container.innerHTML = avatarOptions.map((avatar) => `
       <button class="avatar-option${avatar.id === activeId ? " active" : ""}" type="button" data-avatar="${avatar.id}" aria-label="Select ${avatar.label} avatar">
-        <img class="avatar-preview" src="${avatarImageSrc(avatar)}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+        <img class="avatar-preview" src="${avatarImageSrc(avatar)}" alt="" aria-hidden="true" loading="eager" decoding="async" referrerpolicy="no-referrer" />
         <span>${escapeHtml(avatar.label)}</span>
       </button>
     `).join("");
@@ -1330,6 +1329,11 @@ function renderAvatarPickers() {
 function renderActiveAvatar(avatarId) {
   if (!el.accountAvatar) return;
   const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(avatarId)) || avatarOptions[0];
+  el.accountAvatar.referrerPolicy = "no-referrer";
+  el.accountAvatar.onerror = () => {
+    el.accountAvatar.onerror = null;
+    el.accountAvatar.src = avatarDataUri(avatar);
+  };
   el.accountAvatar.src = avatarImageSrc(avatar);
   el.accountAvatar.alt = `${avatar.label} avatar`;
 }
@@ -1337,6 +1341,11 @@ function renderActiveAvatar(avatarId) {
 function renderAccountButton(avatarId, label) {
   const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(avatarId)) || avatarOptions[0];
   if (el.authAvatarThumb) {
+    el.authAvatarThumb.referrerPolicy = "no-referrer";
+    el.authAvatarThumb.onerror = () => {
+      el.authAvatarThumb.onerror = null;
+      el.authAvatarThumb.src = avatarDataUri(avatar);
+    };
     el.authAvatarThumb.src = avatarImageSrc(avatar);
     el.authAvatarThumb.alt = `${avatar.label} avatar`;
   }
@@ -1832,6 +1841,12 @@ function closeMegaMenu() {
 }
 
 function avatarDataUri(avatar) {
+  if (!avatar?.bg1) {
+    const safeLabel = escapeHtml(avatar?.label || "Avatar");
+    const initials = escapeHtml(String(avatar?.label || "AV").split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase() || "AV");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#179de5"/><stop offset="100%" stop-color="#071528"/></linearGradient></defs><rect width="128" height="128" rx="32" fill="url(#g)"/><text x="64" y="73" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="34" font-weight="800" text-anchor="middle">${initials}</text></svg>`;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  }
   const safeLabel = escapeHtml(avatar.label);
   const safeBg1 = escapeHtml(avatar.bg1);
   const safeBg2 = escapeHtml(avatar.bg2);
