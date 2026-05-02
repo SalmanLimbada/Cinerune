@@ -275,7 +275,7 @@ export async function fetchCountryOptions() {
         name: String(entry.english_name || entry.native_name || "").trim()
       }))
       .filter((entry) => entry.code && entry.name)
-      .slice(0, 60);
+      .sort((a, b) => a.name.localeCompare(b.name));
   } catch {
     countries = [
       { code: "US", name: "United States" },

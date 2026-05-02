@@ -7,6 +7,7 @@ import {
 } from "./catalog.js?v=20260501-fix1";
 import { ensureSession } from "./auth-client.js";
 import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
+import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
 
 const bookmarksBaseKey = "cinerune:bookmarks";
 const progressBaseKey = "cinerune:progress";
@@ -139,6 +140,7 @@ async function hydrateProgressEntries(entries) {
     title: entry.title || titleById(entry.id, entry.mediaType) || `Title ${entry.id}`,
     poster: entry.poster || posterById(entry.id, entry.mediaType) || "",
     year: "",
+    progressPercent: Math.max(0, Math.min(100, Number(entry.progress || 0))),
     progressMeta: entry.mediaType === "tv"
       ? `S${entry.season || 1} E${entry.episode || 1} | ${formatSeconds(entry.timestamp)}`
       : `${Math.round(Number(entry.progress || 0))}% | ${formatSeconds(entry.timestamp)}`
@@ -181,6 +183,12 @@ function renderList(container, entries, options = {}) {
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
     sub.textContent = item.progressMeta || [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
+    if (item.progressMeta) {
+      const progressTrack = document.createElement("span");
+      progressTrack.className = "continue-progress";
+      progressTrack.innerHTML = `<span style="width:${Math.max(0, Math.min(100, Number(item.progressPercent || 0)))}%"></span>`;
+      button.appendChild(progressTrack);
+    }
 
     button.addEventListener("click", () => {
       openWatchPage(item.id, item.mediaType, item.season, item.episode, options.resume);
@@ -190,6 +198,7 @@ function renderList(container, entries, options = {}) {
   });
 
   container.appendChild(fragment);
+  initDragScroll();
 }
 
 function buildPosterPlaceholder(title) {

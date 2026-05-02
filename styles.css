@@ -117,6 +117,9 @@ body {
   font-size: 0.84rem;
   padding: 0.2rem 0;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
 }
 
 .mega-menu-item:hover {
@@ -260,6 +263,7 @@ body {
   font-weight: 700;
   padding: 0.52rem 0.92rem;
   cursor: pointer;
+  touch-action: pan-y;
   text-decoration: none;
 }
 
@@ -267,6 +271,9 @@ body {
   background: rgba(12, 30, 50, 0.85);
   color: #d9e9fb;
 }
+  -webkit-user-drag: none;
+  user-drag: none;
+  user-select: none;
 
 .home-shell,
 .watch-shell {
@@ -371,11 +378,19 @@ body {
 .poster-row,
 .poster-grid {
   display: flex;
-  gap: 0.62rem;
+  gap: 0.78rem;
   overflow-x: auto;
   padding-bottom: 0.65rem;
   scrollbar-width: thin;
   scrollbar-color: rgba(23, 157, 229, 0.9) rgba(126, 166, 205, 0.2);
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.poster-row.dragging,
+.explorer-rail.dragging {
+  cursor: grabbing;
 }
 
 .poster-grid {
@@ -397,8 +412,8 @@ body {
 
 .poster-card {
   position: relative;
-  width: 130px;
-  min-width: 130px;
+  width: 150px;
+  min-width: 150px;
 }
 
 .poster-btn {
@@ -462,15 +477,31 @@ body {
 
 .poster-title {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   line-height: 1.2;
 }
 
 .poster-sub {
   margin: 0.12rem 0 0;
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.74rem;
   line-height: 1.2;
+}
+
+.continue-progress {
+  display: block;
+  height: 5px;
+  margin-top: 0.4rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(126, 166, 205, 0.22);
+}
+
+.continue-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand-a), var(--brand-b));
 }
 
 .badge-hd {
@@ -495,6 +526,9 @@ body {
   overflow-x: auto;
   padding-bottom: 0.55rem;
   scrollbar-color: rgba(23, 157, 229, 0.9) rgba(126, 166, 205, 0.2);
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
 }
 
 .explorer-chip {
@@ -1581,8 +1615,8 @@ body {
   }
 
   .poster-card {
-    width: 118px;
-    min-width: 118px;
+    width: 136px;
+    min-width: 136px;
   }
 
   .folder-grid {
@@ -1731,8 +1765,8 @@ body {
   }
 
   .poster-card {
-    width: 106px;
-    min-width: 106px;
+    width: 124px;
+    min-width: 124px;
   }
 
   .row-head {
@@ -1743,4 +1777,21 @@ body {
     max-height: 72vh;
     overflow: auto;
   }
+}
+.country-flag {
+  width: 1.2rem;
+  flex: 0 0 auto;
+  height: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.country-flag-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 2px;
+  display: block;
 }

@@ -3,6 +3,7 @@ import {
   searchCatalog
 } from "./catalog.js?v=20260501-fix1";
 import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
+import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = {
@@ -108,6 +109,7 @@ function renderPosterCards(items) {
   });
 
   el.searchPageGrid.appendChild(fragment);
+  initDragScroll();
 }
 
 function setPosterImage(image, item) {

@@ -3,6 +3,7 @@ import {
   fetchTopRated
 } from "./catalog.js?v=20260501-fix1";
 import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
+import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
 
 const query = new URLSearchParams(window.location.search);
 const mediaType = query.get("type") === "tv" ? "tv" : "movie";
@@ -73,6 +74,7 @@ function renderPosterCards(items) {
   });
 
   el.topRatedGrid.appendChild(fragment);
+  initDragScroll();
 }
 
 function setPosterImage(image, item) {

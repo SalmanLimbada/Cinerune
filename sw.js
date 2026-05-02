@@ -1,5 +1,5 @@
-const STATIC_CACHE = "cinerune-static-v29";
-const ASSETS = ["./", "./index.html", "./watch.html", "./lists.html", "./browse.html", "./search.html", "./top-rated.html", "./inbox.html", "./styles.css", "./app.js", "./watch.js", "./lists.js", "./browse.js", "./search.js", "./top-rated.js", "./inbox.js", "./notifications.js", "./shared-ui.js", "./auth-client.js", "./catalog.js", "./config.js", "./favicon.svg"];
+const STATIC_CACHE = "cinerune-static-v30";
+const ASSETS = ["./", "./index.html", "./watch.html", "./lists.html", "./browse.html", "./search.html", "./top-rated.html", "./inbox.html", "./styles.css", "./app.js", "./watch.js", "./lists.js", "./browse.js", "./search.js", "./top-rated.js", "./inbox.js", "./notifications.js", "./drag-scroll.js", "./shared-ui.js", "./auth-client.js", "./catalog.js", "./config.js", "./favicon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -28,7 +28,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
 
   if (url.origin === self.location.origin) {
-    const appShellPaths = new Set(["/", "/index.html", "/watch.html", "/lists.html", "/browse.html", "/search.html", "/top-rated.html", "/inbox.html", "/styles.css", "/app.js", "/watch.js", "/lists.js", "/browse.js", "/search.js", "/top-rated.js", "/inbox.js", "/notifications.js", "/shared-ui.js", "/auth-client.js", "/catalog.js", "/config.js", "/favicon.svg"]);
+    const appShellPaths = new Set(["/", "/index.html", "/watch.html", "/lists.html", "/browse.html", "/search.html", "/top-rated.html", "/inbox.html", "/styles.css", "/app.js", "/watch.js", "/lists.js", "/browse.js", "/search.js", "/top-rated.js", "/inbox.js", "/notifications.js", "/drag-scroll.js", "/shared-ui.js", "/auth-client.js", "/catalog.js", "/config.js", "/favicon.svg"]);
     const networkFirst = appShellPaths.has(url.pathname);
 
     if (networkFirst) {

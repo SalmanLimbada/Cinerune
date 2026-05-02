@@ -1,6 +1,7 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession } from "./auth-client.js";
 import { avatarDataUri, avatarSrcById, normalizeAvatarId } from "./shared-ui.js?v=20260502-notifications1";
 import { initHeaderNotifications } from "./notifications.js?v=20260502-notifications1";
+import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
 import {
   initTmdb,
   fetchItemDetailsById,
@@ -534,6 +535,7 @@ async function renderRelated() {
 
   el.relatedRail.innerHTML = "";
   el.relatedRail.appendChild(fragment);
+  initDragScroll();
 }
 
 function setPosterImage(image, item) {

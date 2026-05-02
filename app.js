@@ -1,5 +1,6 @@
 import { apiRequest, authHeaders, ensureSession, setStoredSession, clearStoredSession } from "./auth-client.js";
 import * as catalogApi from "./catalog.js?v=20260501-fix1";
+import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
 
 const initTmdb = catalogApi.initTmdb;
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
@@ -466,9 +467,10 @@ function renderMegaMenu() {
   el.megaMenuGrid.innerHTML = options.map((entry) => {
     const value = isGenre ? entry.id : entry.code;
     const label = entry.name;
+    const flag = isGenre ? "" : countryFlagMarkup(value);
     return `
     <button class="mega-menu-item" type="button" data-mode="${state.explorerMode}" data-value="${escapeHtml(value)}" data-name="${escapeHtml(label)}">
-      ${escapeHtml(label)}
+      ${flag ? `<span class="country-flag" aria-hidden="true">${flag}</span>` : ""}<span>${escapeHtml(label)}</span>
     </button>
   `;
   }).join("");
@@ -508,6 +510,7 @@ async function hydrateContinueRow() {
       title: apiItem?.title || entry.title || titleById(entry.id, entry.mediaType) || `Title ${entry.id}`,
       poster: apiItem?.poster || entry.poster || posterById(entry.id, entry.mediaType) || "",
       year: apiItem?.year || "",
+      progressPercent: Math.max(0, Math.min(100, Number(entry.progress || 0))),
       progressKey: `${entry.mediaType}:${entry.id}:${entry.season || 1}:${entry.episode || 1}`,
       progressMeta: entry.mediaType === "tv"
         ? `S${entry.season || 1} E${entry.episode || 1} • ${formatSeconds(entry.timestamp)}`
@@ -547,6 +550,10 @@ function renderPosterCards(container, items, options = {}) {
 
     if (options.showProgressMeta && item.progressMeta) {
       sub.textContent = item.progressMeta;
+      const progressTrack = document.createElement("span");
+      progressTrack.className = "continue-progress";
+      progressTrack.innerHTML = `<span style="width:${Math.max(0, Math.min(100, Number(item.progressPercent || 0)))}%"></span>`;
+      button.appendChild(progressTrack);
     } else {
       const typeLabel = item.mediaType === "movie" ? "Movie" : "TV";
       sub.textContent = [typeLabel, item.year].filter(Boolean).join(" | ");
@@ -582,6 +589,7 @@ function renderPosterCards(container, items, options = {}) {
   });
 
   container.appendChild(fragment);
+  initDragScroll();
 }
 
 function dedupeContinueEntries(entries) {
@@ -1815,6 +1823,33 @@ function openBrowsePage(mode, value, name) {
   url.searchParams.set("value", String(value || ""));
   if (name) url.searchParams.set("name", String(name));
   window.location.href = url.toString();
+}
+
+function countryFlagMarkup(code) {
+  const normalized = String(code || "").trim().toLowerCase();
+  const mapped = normalizeCountryFlagCode(normalized);
+  if (!mapped) return "";
+  const src = `https://flagcdn.com/24x18/${mapped}.png`;
+  return `<img class="country-flag-image" src="${escapeHtml(src)}" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
+}
+
+function normalizeCountryFlagCode(code) {
+  const value = String(code || "").trim().toLowerCase();
+  if (!value) return "";
+  const aliases = {
+    uk: "gb",
+    tp: "tl",
+    yu: "rs",
+    zr: "cd",
+    dd: "de",
+    fx: "fr",
+    cs: "rs",
+    su: "ru",
+    an: "nl",
+    bu: "mm"
+  };
+  const mapped = aliases[value] || value;
+  return /^[a-z]{2}$/.test(mapped) ? mapped : "";
 }
 
 function dedupeExplorerOptions(items, key) {

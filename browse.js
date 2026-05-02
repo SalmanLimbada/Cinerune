@@ -6,6 +6,7 @@ import {
   fetchTitlesByCountry
 } from "./catalog.js?v=20260502-browse2";
 import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
+import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = { valueMax: 12, nameMax: 40 };
@@ -86,9 +87,10 @@ async function renderOptions() {
   el.browseOptionsGrid.innerHTML = options.map((entry) => {
     const valueId = mode === "country" ? entry.code : entry.id;
     const label = entry.name;
+    const flag = mode === "country" ? countryFlagMarkup(valueId) : "";
     return `
       <button class="mega-menu-item" type="button" data-value="${escapeHtml(valueId)}" data-name="${escapeHtml(label)}">
-        ${escapeHtml(label)}
+        ${flag ? `<span class="country-flag" aria-hidden="true">${flag}</span>` : ""}<span>${escapeHtml(label)}</span>
       </button>
     `;
   }).join("");
@@ -200,6 +202,34 @@ function renderPosterCards(container, items) {
   });
 
   container.appendChild(fragment);
+  initDragScroll();
+}
+
+function countryFlagMarkup(code) {
+  const normalized = String(code || "").trim().toLowerCase();
+  const mapped = normalizeCountryFlagCode(normalized);
+  if (!mapped) return "";
+  const src = `https://flagcdn.com/24x18/${mapped}.png`;
+  return `<img class="country-flag-image" src="${escapeHtml(src)}" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
+}
+
+function normalizeCountryFlagCode(code) {
+  const value = String(code || "").trim().toLowerCase();
+  if (!value) return "";
+  const aliases = {
+    uk: "gb",
+    tp: "tl",
+    yu: "rs",
+    zr: "cd",
+    dd: "de",
+    fx: "fr",
+    cs: "rs",
+    su: "ru",
+    an: "nl",
+    bu: "mm"
+  };
+  const mapped = aliases[value] || value;
+  return /^[a-z]{2}$/.test(mapped) ? mapped : "";
 }
 
 function setPosterImage(image, item) {
