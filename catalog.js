@@ -329,18 +329,8 @@ export async function fetchTitlesByCountry(countryCode, page = 1) {
   if (!code) return { movies: [], tv: [], page: 1, totalPages: 1 };
 
   const [movieData, tvData] = await Promise.all([
-    tmdbRequest("/discover/movie", {
-      region: code,
-      include_adult: "false",
-      sort_by: "popularity.desc",
-      page
-    }),
-    tmdbRequest("/discover/tv", {
-      with_origin_country: code,
-      include_adult: "false",
-      sort_by: "popularity.desc",
-      page
-    })
+    fetchCountryMedia("movie", code, page),
+    fetchCountryMedia("tv", code, page)
   ]);
 
   const movies = normalizeList(movieData.results || []);
@@ -351,6 +341,46 @@ export async function fetchTitlesByCountry(countryCode, page = 1) {
   );
   cacheItems([...movies, ...tv]);
   return { movies, tv, page, totalPages };
+}
+
+async function fetchCountryMedia(mediaType, countryCode, page) {
+  const path = mediaType === "tv" ? "/discover/tv" : "/discover/movie";
+  const firstPage = await tmdbRequest(path, {
+    with_origin_country: countryCode,
+    include_adult: "false",
+    sort_by: "popularity.desc",
+    page
+  });
+
+  const firstResults = firstPage.results || [];
+  const totalPages = Math.max(1, Math.min(500, Number(firstPage.total_pages || 1) || 1));
+  if (firstResults.length >= 12 || page > 1 || totalPages <= 1) {
+    return firstPage;
+  }
+
+  const extraPages = Array.from(
+    { length: Math.min(2, totalPages - 1) },
+    (_unused, index) => page + index + 1
+  );
+  const extraResponses = await Promise.all(
+    extraPages.map((nextPage) =>
+      tmdbRequest(path, {
+        with_origin_country: countryCode,
+        include_adult: "false",
+        sort_by: "popularity.desc",
+        page: nextPage
+      }).catch(() => ({ results: [] }))
+    )
+  );
+
+  return {
+    ...firstPage,
+    results: dedupeByTmdbId([
+      ...firstResults,
+      ...extraResponses.flatMap((response) => response.results || [])
+    ]),
+    total_pages: totalPages
+  };
 }
 
 export async function fetchTopRated(mediaType, pages = 2) {
@@ -707,6 +737,15 @@ async function fetchGenres(mediaType) {
 function parseYear(value) {
   const match = String(value || "").match(/\d{4}/);
   return match ? Number(match[0]) : null;
+}
+
+function dedupeByTmdbId(items) {
+  const map = new Map();
+  items.forEach((item) => {
+    const id = Number(item?.id || 0);
+    if (id) map.set(id, item);
+  });
+  return [...map.values()];
 }
 
 function dedupeByKey(items) {

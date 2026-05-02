@@ -1,5 +1,6 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession } from "./auth-client.js";
-import { avatarDataUri, avatarSrcById, normalizeAvatarId } from "./shared-ui.js";
+import { avatarDataUri, avatarSrcById, normalizeAvatarId } from "./shared-ui.js?v=20260502-notifications1";
+import { initHeaderNotifications } from "./notifications.js?v=20260502-notifications1";
 import {
   initTmdb,
   fetchItemDetailsById,
@@ -97,7 +98,8 @@ const state = {
   session: null,
   item: null,
   autoSyncTimer: null,
-  lastSyncAt: 0
+  lastSyncAt: 0,
+  lastAutoNextKey: ""
 };
 
 boot();
@@ -112,6 +114,7 @@ async function boot() {
 
 
   bindEvents();
+  initHeaderNotifications();
   if (el.bookmarkMenu) {
     el.bookmarkMenu.setAttribute("hidden", "");
   }
@@ -169,6 +172,7 @@ function bindEvents() {
       state.session = null;
       syncProgressState();
       closeWatchAccountMenu();
+      document.getElementById("notificationsWrap")?.setAttribute("hidden", "");
       renderWatchAccountUI();
     });
   }
@@ -321,11 +325,7 @@ async function refillEpisodeGrid() {
 
 function playEpisode(episode) {
   state.episode = Number(episode) || 1;
-  if (el.episodeGrid) {
-    [...el.episodeGrid.querySelectorAll(".episode-pill")].forEach((node) => {
-      node.classList.toggle("active", Number(node.dataset.episode) === state.episode);
-    });
-  }
+  syncEpisodeSelection();
   loadPlayer();
 }
 
@@ -360,6 +360,20 @@ async function playNextEpisode() {
 
   await hydrateEpisodeControls();
   loadPlayer();
+}
+
+async function syncEpisodeSelection() {
+  if (state.mediaType !== "tv") return;
+  if (el.seasonSelect && Number(el.seasonSelect.value) !== Number(state.season)) {
+    el.seasonSelect.value = String(state.season);
+    await refillEpisodeGrid();
+    return;
+  }
+  if (el.episodeGrid) {
+    [...el.episodeGrid.querySelectorAll(".episode-pill")].forEach((node) => {
+      node.classList.toggle("active", Number(node.dataset.episode) === Number(state.episode));
+    });
+  }
 }
 
 function loadPlayer() {
@@ -644,7 +658,7 @@ function showBookmarkToast(message) {
   }, 1200);
 }
 
-function onPlayerMessage(event) {
+async function onPlayerMessage(event) {
   if (!event?.data) return;
 
   let parsed = event.data;
@@ -665,7 +679,15 @@ function onPlayerMessage(event) {
   const season = Number(data.season) || state.season || 1;
   const episode = Number(data.episode) || state.episode || 1;
   const key = `${mediaType}:${id}:${season}:${episode}`;
+  const isCurrentTitle = mediaType === state.mediaType && id === Number(state.id);
   state.lastPlayerEventAt = Date.now();
+
+  if (isCurrentTitle && mediaType === "tv" && (season !== state.season || episode !== state.episode)) {
+    state.season = season;
+    state.episode = episode;
+    await syncEpisodeSelection();
+  }
+
   if (Number.isFinite(Number(data.currentTime))) {
     state.lastPlaybackTime = Math.max(0, Number(data.currentTime) || 0);
   }
@@ -703,8 +725,13 @@ function onPlayerMessage(event) {
   localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
   queueAutoSync(data.event === "ended");
 
-  if (data.event === "ended" && mediaType === "tv" && state.settings.autoNextSmart) {
-    playNextEpisode();
+  if (data.event === "ended" && mediaType === "tv" && state.settings.autoNextSmart && isCurrentTitle) {
+    if (state.lastAutoNextKey === key) return;
+    state.lastAutoNextKey = key;
+    window.setTimeout(() => {
+      if (state.lastAutoNextKey === key) state.lastAutoNextKey = "";
+    }, 8000);
+    await playNextEpisode();
   }
 }
 
@@ -728,6 +755,7 @@ function renderWatchAccountUI() {
   if (state.session?.user) {
     const avatarId = normalizeAvatarId(state.session.user.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "luffy"));
     if (el.watchAccountAvatar) {
+      el.watchAccountAvatar.removeAttribute("hidden");
       setAccountAvatarImage(el.watchAccountAvatar, avatarId);
       el.watchAccountAvatar.alt = "Selected avatar";
     }
@@ -735,10 +763,10 @@ function renderWatchAccountUI() {
     el.watchAccountBtn.classList.add("active");
     if (el.watchListsLink) el.watchListsLink.removeAttribute("hidden");
   } else {
-    const avatarId = normalizeAvatarId(readJson("cinerune:avatar-choice", "luffy"));
     if (el.watchAccountAvatar) {
-      setAccountAvatarImage(el.watchAccountAvatar, avatarId);
-      el.watchAccountAvatar.alt = "Selected avatar";
+      el.watchAccountAvatar.setAttribute("hidden", "");
+      el.watchAccountAvatar.removeAttribute("src");
+      el.watchAccountAvatar.alt = "";
     }
     if (el.watchAccountLabel) el.watchAccountLabel.textContent = "Login";
     el.watchAccountBtn.classList.remove("active");

@@ -4,8 +4,8 @@ import {
   fetchCountryOptions,
   fetchTitlesByGenre,
   fetchTitlesByCountry
-} from "./catalog.js?v=20260501-fix1";
-import { initSharedHeader } from "./shared-ui.js";
+} from "./catalog.js?v=20260502-browse2";
+import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = { valueMax: 12, nameMax: 40 };
@@ -17,7 +17,10 @@ const page = Math.max(1, Number(query.get("page") || 1));
 const el = {
   browseOptionsGrid: document.getElementById("browseOptionsGrid"),
   browseTitle: document.getElementById("browseTitle"),
+  browseOptionsSection: document.getElementById("browseOptionsSection"),
+  browseMoviesSection: document.getElementById("browseMoviesSection"),
   browseMoviesGrid: document.getElementById("browseMoviesGrid"),
+  browseTvSection: document.getElementById("browseTvSection"),
   browseTvGrid: document.getElementById("browseTvGrid"),
   browsePagination: document.getElementById("browsePagination"),
   posterCardTemplate: document.getElementById("posterCardTemplate")
@@ -42,11 +45,17 @@ async function boot() {
     el.browseTitle.textContent = mode === "country" ? "Countries" : "Genres";
     if (el.browseMoviesGrid) el.browseMoviesGrid.innerHTML = "";
     if (el.browseTvGrid) el.browseTvGrid.innerHTML = "";
+    el.browseMoviesSection?.setAttribute("hidden", "");
+    el.browseTvSection?.setAttribute("hidden", "");
+    el.browsePagination?.setAttribute("hidden", "");
     await renderOptions();
     return;
   }
 
   el.browseTitle.textContent = `${mode === "country" ? "Country" : "Genre"}: ${name || value}`;
+  el.browseOptionsSection?.setAttribute("hidden", "");
+  el.browseMoviesSection?.removeAttribute("hidden");
+  el.browseTvSection?.removeAttribute("hidden");
 
   try {
     const data = mode === "country"
@@ -55,10 +64,14 @@ async function boot() {
 
     renderPosterCards(el.browseMoviesGrid, data.movies || []);
     renderPosterCards(el.browseTvGrid, data.tv || []);
+    el.browseMoviesSection?.toggleAttribute("hidden", !(data.movies || []).length);
+    el.browseTvSection?.toggleAttribute("hidden", !(data.tv || []).length);
     renderBrowsePagination(data.totalPages || 1);
   } catch {
     el.browseMoviesGrid.innerHTML = "";
     el.browseTvGrid.innerHTML = "";
+    el.browseMoviesSection?.setAttribute("hidden", "");
+    el.browseTvSection?.setAttribute("hidden", "");
     renderBrowsePagination(1);
   }
 }

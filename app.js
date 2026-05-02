@@ -1340,15 +1340,22 @@ function renderActiveAvatar(avatarId) {
 }
 
 function renderAccountButton(avatarId, label) {
+  const showAvatar = label !== "Login";
   const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(avatarId)) || avatarOptions[0];
   if (el.authAvatarThumb) {
-    el.authAvatarThumb.referrerPolicy = "no-referrer";
-    el.authAvatarThumb.onerror = () => {
-      el.authAvatarThumb.onerror = null;
-      el.authAvatarThumb.src = avatarDataUri(avatar);
-    };
-    el.authAvatarThumb.src = avatarImageSrc(avatar);
-    el.authAvatarThumb.alt = `${avatar.label} avatar`;
+    el.authAvatarThumb.toggleAttribute("hidden", !showAvatar);
+    if (showAvatar) {
+      el.authAvatarThumb.referrerPolicy = "no-referrer";
+      el.authAvatarThumb.onerror = () => {
+        el.authAvatarThumb.onerror = null;
+        el.authAvatarThumb.src = avatarDataUri(avatar);
+      };
+      el.authAvatarThumb.src = avatarImageSrc(avatar);
+      el.authAvatarThumb.alt = `${avatar.label} avatar`;
+    } else {
+      el.authAvatarThumb.removeAttribute("src");
+      el.authAvatarThumb.alt = "";
+    }
   }
   if (el.authButtonLabel) {
     el.authButtonLabel.textContent = label;

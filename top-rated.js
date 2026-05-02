@@ -2,7 +2,7 @@ import {
   initTmdb,
   fetchTopRated
 } from "./catalog.js?v=20260501-fix1";
-import { initSharedHeader } from "./shared-ui.js";
+import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
 
 const query = new URLSearchParams(window.location.search);
 const mediaType = query.get("type") === "tv" ? "tv" : "movie";

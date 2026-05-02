@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link rel="icon" href="./favicon.svg?v=20260430" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260502-notifications1" />
   </head>
   <body class="home-body">
     <div class="home-atmosphere" aria-hidden="true"></div>
@@ -41,6 +41,7 @@
           <div id="notificationsMenu" class="account-menu notifications-menu" hidden>
             <div class="notifications-head">
               <strong>Notifications</strong>
+              <a class="mini-action-btn" href="./inbox.html">Inbox</a>
               <button id="notificationsMarkAll" class="mini-action-btn" type="button">Read</button>
             </div>
             <div id="notificationsList" class="notifications-list"></div>
@@ -53,6 +54,7 @@
           </button>
           <div id="accountMenu" class="account-menu" hidden>
             <button id="openAccountSettings" class="account-menu-item" type="button">Settings</button>
+            <a class="account-menu-item" href="./inbox.html">Inbox</a>
             <a class="account-menu-item" href="./lists.html">Bookmarks</a>
             <a id="continueWatchingLink" class="account-menu-item" href="./index.html#continueSection">Continue Watching</a>
             <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">Sign Out</button>
@@ -288,6 +290,6 @@
         document.head.appendChild(script);
       })();
     </script>
-    <script type="module" src="app.js?v=20260501-fix1"></script>
+    <script type="module" src="app.js?v=20260502-login1"></script>
   </body>
 </html>

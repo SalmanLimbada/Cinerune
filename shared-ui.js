@@ -1,4 +1,5 @@
 import { clearStoredSession, ensureSession } from "./auth-client.js";
+import { initHeaderNotifications } from "./notifications.js?v=20260502-notifications1";
 
 const avatarOptions = [
   { id: "luffy", label: "Monkey D. Luffy", src: "https://avatarfiles.alphacoders.com/141/141955.png" },
@@ -59,6 +60,7 @@ export function initSharedHeader() {
     currentSession = null;
     renderSharedAccount(avatar, label, null);
     accountMenu?.setAttribute("hidden", "");
+    document.getElementById("notificationsWrap")?.setAttribute("hidden", "");
   });
 
   document.addEventListener("click", (event) => {
@@ -67,22 +69,31 @@ export function initSharedHeader() {
       accountBtn?.classList.remove("active");
     }
   });
+
+  initHeaderNotifications();
 }
 
 function renderSharedAccount(avatarEl, labelEl, session) {
+  const signedIn = Boolean(session?.user);
   const avatarId = normalizeAvatarId(session?.user?.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "luffy"));
   if (avatarEl) {
-    const avatar = avatarOptions.find((option) => option.id === avatarId) || avatarOptions[0];
-    avatarEl.referrerPolicy = "no-referrer";
-    avatarEl.onerror = () => {
-      avatarEl.onerror = null;
-      avatarEl.src = avatarDataUri(avatar);
-    };
-    avatarEl.src = avatarSrcById(avatar.id);
-    avatarEl.alt = `${avatar.label} avatar`;
+    avatarEl.toggleAttribute("hidden", !signedIn);
+    if (signedIn) {
+      const avatar = avatarOptions.find((option) => option.id === avatarId) || avatarOptions[0];
+      avatarEl.referrerPolicy = "no-referrer";
+      avatarEl.onerror = () => {
+        avatarEl.onerror = null;
+        avatarEl.src = avatarDataUri(avatar);
+      };
+      avatarEl.src = avatarSrcById(avatar.id);
+      avatarEl.alt = `${avatar.label} avatar`;
+    } else {
+      avatarEl.removeAttribute("src");
+      avatarEl.alt = "";
+    }
   }
   if (labelEl) {
-    labelEl.textContent = session?.user ? "Account" : "Login";
+    labelEl.textContent = signedIn ? "Account" : "Login";
   }
 }
 

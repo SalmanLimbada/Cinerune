@@ -373,13 +373,26 @@ body {
   display: flex;
   gap: 0.62rem;
   overflow-x: auto;
-  padding-bottom: 0.2rem;
+  padding-bottom: 0.65rem;
   scrollbar-width: thin;
+  scrollbar-color: rgba(23, 157, 229, 0.9) rgba(126, 166, 205, 0.2);
 }
 
 .poster-grid {
   flex-wrap: wrap;
   overflow: visible;
+  padding-bottom: 0.2rem;
+}
+
+.poster-row::-webkit-scrollbar,
+.explorer-rail::-webkit-scrollbar {
+  height: 12px;
+}
+
+.poster-row::-webkit-scrollbar-track,
+.explorer-rail::-webkit-scrollbar-track {
+  background: rgba(126, 166, 205, 0.2);
+  border: 1px solid rgba(201, 225, 247, 0.1);
 }
 
 .poster-card {
@@ -480,7 +493,8 @@ body {
   display: flex;
   gap: 0.45rem;
   overflow-x: auto;
-  padding-bottom: 0.2rem;
+  padding-bottom: 0.55rem;
+  scrollbar-color: rgba(23, 157, 229, 0.9) rgba(126, 166, 205, 0.2);
 }
 
 .explorer-chip {
@@ -1033,6 +1047,19 @@ body {
 .notification-empty {
   margin: 0;
   padding: 0.55rem 0.6rem 0.35rem;
+}
+
+.inbox-shell {
+  max-width: 860px;
+}
+
+.inbox-list {
+  gap: 0.45rem;
+}
+
+.inbox-list .notification-item {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(145, 178, 205, 0.12);
 }
 
 .account-menu-item {

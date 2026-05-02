@@ -6,7 +6,7 @@ import {
   isSensitiveCatalogItem
 } from "./catalog.js?v=20260501-fix1";
 import { ensureSession } from "./auth-client.js";
-import { initSharedHeader } from "./shared-ui.js";
+import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
 
 const bookmarksBaseKey = "cinerune:bookmarks";
 const progressBaseKey = "cinerune:progress";
