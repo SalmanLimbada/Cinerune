@@ -114,7 +114,7 @@ async function loadNotificationState(session) {
   const progress = readJson(getProgressKey(session), {});
   const readIds = new Set(readJson(getNotificationReadKey(session), []));
   const watchedShows = Object.values(bookmarks || {})
-    .filter((entry) => entry?.mediaType === "tv" && entry?.status === "watched")
+    .filter((entry) => entry?.mediaType === "tv" && (entry?.status === "watched" || entry?.status === "watching"))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
     .slice(0, 16);
 
@@ -160,12 +160,15 @@ async function buildEpisodeNotification(entry, progress) {
 
 function renderNotifications(container, state, options = {}) {
   const notifications = state.notifications || [];
-  if (!notifications.length) {
+  const visible = options.compact
+    ? notifications.filter((item) => !state.readIds.has(item.readId))
+    : notifications;
+  if (!visible.length) {
     container.innerHTML = '<p class="notification-empty tiny muted">No new episodes right now.</p>';
     return;
   }
 
-  container.innerHTML = notifications.map((item) => {
+  container.innerHTML = visible.map((item) => {
     const read = state.readIds.has(item.readId);
     return `
       <div class="notification-item${read ? " read" : ""}" data-read-id="${escapeHtml(item.readId)}">

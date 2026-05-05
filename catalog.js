@@ -408,6 +408,20 @@ export async function fetchTopRated(mediaType, pages = 2) {
   return items;
 }
 
+export async function fetchTopRatedPage(mediaType, page = 1) {
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  const safePage = Math.max(1, Math.min(500, Number(page || 1)));
+  const path = normalizedType === "tv" ? "/tv/top_rated" : "/movie/top_rated";
+  const data = await tmdbRequest(path, {
+    include_adult: "false",
+    page: safePage
+  });
+  const items = normalizeList(data.results || []);
+  cacheItems(items);
+  const totalPages = Math.max(1, Math.min(500, Number(data.total_pages || 1) || 1));
+  return { items, page: safePage, totalPages };
+}
+
 export async function fetchGenreSections() {
   const [movieGenres, tvGenres] = await Promise.all([
     fetchGenres("movie"),
@@ -496,14 +510,103 @@ export async function fetchItemDetailsById(id, mediaType) {
   const normalizedType = mediaType === "tv" ? "tv" : "movie";
   const key = `${normalizedType}:${Number(id)}`;
   const cached = itemCache.get(key);
-  if (cached?.plot && cached?.runtime && cached?.genre) return cached;
+  
+  // For movies, return complete cache
+  if (normalizedType === "movie" && cached?.plot && cached?.runtime && cached?.genre) {
+    return cached;
+  }
+  
+  // For TV shows, use cached data only if recent (less than 1 hour for episode checks),
+  // but always verify latest episode to catch new releases immediately
+  if (normalizedType === "tv" && cached?.plot && cached?.runtime && cached?.genre) {
+    const cacheAge = Date.now() - (cached._episodeCachedAt || 0);
+    const EPISODE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+    
+    // If episode cache is fresh, return as-is
+    if (cacheAge < EPISODE_CACHE_TTL) {
+      return cached;
+    }
+    
+    // If episode cache is stale, verify latest episode without re-fetching full metadata
+    try {
+      const totalSeasons = Number(cached.totalSeasons || 1);
+      const latestSeason = await findTrueLatestEpisode(Number(id), totalSeasons);
+      if (latestSeason) {
+        cached.latestEpisodeSeason = latestSeason.season;
+        cached.latestEpisodeNumber = latestSeason.episode;
+        cached.latestEpisodeName = latestSeason.name;
+        cached.latestEpisodeAirDate = latestSeason.airDate;
+        cached._episodeCachedAt = Date.now();
+        cacheItems([cached]);
+      }
+    } catch {
+      // Fallback to existing cached episode if fetch fails
+    }
+    
+    return cached;
+  }
 
   const data = await tmdbRequest(`/${normalizedType}/${Number(id)}`);
   const item = normalizeItem({ ...data, media_type: normalizedType });
+  
+  // For TV shows, verify latest episode by checking recent seasons
+  // in case TMDB's last_episode_to_air is stale
+  if (normalizedType === "tv" && item && data.number_of_seasons > 0) {
+    try {
+      const latestSeason = await findTrueLatestEpisode(Number(id), data.number_of_seasons);
+      if (latestSeason) {
+        item.latestEpisodeSeason = latestSeason.season;
+        item.latestEpisodeNumber = latestSeason.episode;
+        item.latestEpisodeName = latestSeason.name;
+        item.latestEpisodeAirDate = latestSeason.airDate;
+      }
+    } catch {
+      // Fallback to TMDB's last_episode_to_air if fetching seasons fails
+    }
+  }
+  
   if (item) {
+    item._episodeCachedAt = Date.now();
     cacheItems([item]);
   }
   return item;
+}
+
+async function findTrueLatestEpisode(tvId, totalSeasons) {
+  // Check last 2 seasons for the true latest aired episode
+  const seasonsToCheck = Math.max(1, totalSeasons - 1);
+  const results = [];
+  
+  for (let season = totalSeasons; season >= seasonsToCheck; season--) {
+    try {
+      const data = await tmdbRequest(`/tv/${Number(tvId)}/season/${Number(season)}`);
+      const episodes = data?.episodes || [];
+      
+      for (const episode of episodes) {
+        const airDate = String(episode?.air_date || "").trim();
+        if (airDate && isReleasedAirDate(airDate)) {
+          results.push({
+            season: Number(episode?.season_number || 0),
+            episode: Number(episode?.episode_number || 0),
+            name: String(episode?.name || "").trim(),
+            airDate
+          });
+        }
+      }
+    } catch {
+      // Continue to next season
+    }
+  }
+  
+  if (results.length === 0) return null;
+  
+  // Sort by season then episode, return the latest
+  results.sort((a, b) => {
+    if (a.season !== b.season) return b.season - a.season;
+    return b.episode - a.episode;
+  });
+  
+  return results[0];
 }
 
 export async function fetchRelatedById(id, mediaType) {
@@ -723,15 +826,31 @@ async function fetchGenres(mediaType) {
   try {
     const data = await tmdbRequest(`/genre/${normalized}/list`);
     genres = (data?.genres || [])
-      .map((genre) => ({ id: Number(genre.id), name: String(genre.name || "").trim() }))
+      .map((genre) => ({
+        id: Number(genre.id),
+        name: normalizeGenreLabel(String(genre.name || "").trim())
+      }))
       .filter((genre) => genre.id > 0 && genre.name)
-      .slice(0, 20);
+      .filter((genre) => {
+        const normalizedName = normalizeGenreLabel(genre.name).toLowerCase();
+        if (normalized === "movie") {
+          return !["tv movie", "talk show", "soap"].includes(normalizedName);
+        }
+        return !["tv movie"].includes(normalizedName);
+      });
   } catch {
     genres = normalized === "tv" ? fallbackTvGenres : fallbackMovieGenres;
   }
 
   genreCache[normalized] = genres;
   return genres;
+}
+
+function normalizeGenreLabel(name) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.toLowerCase() === "talk") return "Talk Show";
+  return trimmed;
 }
 
 function parseYear(value) {

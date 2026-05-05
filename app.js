@@ -1,4 +1,5 @@
 import { apiRequest, authHeaders, ensureSession, setStoredSession, clearStoredSession } from "./auth-client.js";
+import { openSettingsModal } from "./shared-ui.js?v=20260502-notifications1";
 import * as catalogApi from "./catalog.js?v=20260501-fix1";
 import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
 
@@ -95,9 +96,17 @@ const el = {
   megaMenuGrid: document.getElementById("megaMenuGrid"),
   continueSection: document.getElementById("continueSection"),
   continueGrid: document.getElementById("continueGrid"),
+  continuePrevBtn: document.getElementById("continuePrevBtn"),
+  continueNextBtn: document.getElementById("continueNextBtn"),
   recommendedGrid: document.getElementById("recommendedGrid"),
+  recommendedPrevBtn: document.getElementById("recommendedPrevBtn"),
+  recommendedNextBtn: document.getElementById("recommendedNextBtn"),
   trendingGrid: document.getElementById("trendingGrid"),
+  trendingPrevBtn: document.getElementById("trendingPrevBtn"),
+  trendingNextBtn: document.getElementById("trendingNextBtn"),
   popularGrid: document.getElementById("popularGrid"),
+  popularPrevBtn: document.getElementById("popularPrevBtn"),
+  popularNextBtn: document.getElementById("popularNextBtn"),
   searchSuggestions: document.getElementById("searchSuggestions"),
   navSearchBtn: document.getElementById("navSearchBtn"),
   navSearchInput: document.getElementById("navSearchInput"),
@@ -170,7 +179,7 @@ async function boot() {
   await hydrateContinueRow();
 
   if (startupAuthMode === "settings" && state.session?.user) {
-    openAuthModal(true);
+    openSettingsModal();
   } else if (startupAuthMode === "login") {
     openAuthModal(false);
   }
@@ -207,6 +216,11 @@ function bindEvents() {
     });
   }
 
+  bindRowArrows(el.continueGrid, el.continuePrevBtn, el.continueNextBtn);
+  bindRowArrows(el.recommendedGrid, el.recommendedPrevBtn, el.recommendedNextBtn);
+  bindRowArrows(el.trendingGrid, el.trendingPrevBtn, el.trendingNextBtn);
+  bindRowArrows(el.popularGrid, el.popularPrevBtn, el.popularNextBtn);
+
   if (el.closeAuth) {
     el.closeAuth.addEventListener("click", closeAuthModal);
   }
@@ -231,7 +245,7 @@ function bindEvents() {
   if (el.openAccountSettings) {
     el.openAccountSettings.addEventListener("click", () => {
       closeAccountMenu();
-      openAuthModal(true);
+      openSettingsModal();
     });
   }
 
@@ -341,6 +355,17 @@ function bindEvents() {
       state.bookmarks = readJson(getBookmarksKey(state.session), {});
       refreshPersonalizedCollections();
     }
+  });
+}
+
+function bindRowArrows(grid, prevBtn, nextBtn) {
+  if (!grid || !prevBtn || !nextBtn) return;
+  const scrollByAmount = () => Math.max(240, Math.floor(grid.clientWidth * 0.75));
+  prevBtn.addEventListener("click", () => {
+    grid.scrollBy({ left: -scrollByAmount(), behavior: "smooth" });
+  });
+  nextBtn.addEventListener("click", () => {
+    grid.scrollBy({ left: scrollByAmount(), behavior: "smooth" });
   });
 }
 
@@ -539,22 +564,31 @@ function renderPosterCards(container, items, options = {}) {
 
   items.forEach((item) => {
     const node = el.posterCardTemplate.content.firstElementChild.cloneNode(true);
-    const button = node.querySelector(".poster-btn");
+    const link = node.querySelector(".poster-btn");
     const image = node.querySelector(".poster-img");
     const title = node.querySelector(".poster-title");
     const sub = node.querySelector(".poster-sub");
+    const meta = node.querySelector(".poster-meta");
 
     setPosterImage(image, item);
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
 
     if (options.showProgressMeta && item.progressMeta) {
+      node.classList.add("continue-card");
       sub.textContent = item.progressMeta;
+      sub.classList.add("continue-meta");
       const progressTrack = document.createElement("span");
       progressTrack.className = "continue-progress";
       progressTrack.innerHTML = `<span style="width:${Math.max(0, Math.min(100, Number(item.progressPercent || 0)))}%"></span>`;
-      button.appendChild(progressTrack);
+      if (meta) {
+        meta.append(sub, title);
+        link.insertBefore(progressTrack, meta);
+      } else {
+        link.appendChild(progressTrack);
+      }
     } else {
+      sub.classList.remove("continue-meta");
       const typeLabel = item.mediaType === "movie" ? "Movie" : "TV";
       sub.textContent = [typeLabel, item.year].filter(Boolean).join(" | ");
     }
@@ -573,17 +607,15 @@ function renderPosterCards(container, items, options = {}) {
       node.appendChild(removeBtn);
     }
 
-    button.addEventListener("click", () => {
-      const resume = Boolean(options.resumeOnClick);
-      const href = buildWatchHref(
-        item.id,
-        item.mediaType,
-        item.season || item.defaultSeason || 1,
-        item.episode || item.defaultEpisode || 1,
-        resume
-      );
-      window.location.href = href;
-    });
+    const resume = Boolean(options.resumeOnClick);
+    const href = buildWatchHref(
+      item.id,
+      item.mediaType,
+      item.season || item.defaultSeason || 1,
+      item.episode || item.defaultEpisode || 1,
+      resume
+    );
+    if (link) link.href = href;
 
     fragment.appendChild(node);
   });
@@ -656,7 +688,7 @@ async function refreshNotifications() {
   }
 
   const watchedShows = Object.values(state.bookmarks || {})
-    .filter((entry) => entry?.mediaType === "tv" && entry?.status === "watched")
+    .filter((entry) => entry?.mediaType === "tv" && (entry?.status === "watched" || entry?.status === "watching"))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
     .slice(0, 16);
 
@@ -737,17 +769,18 @@ function renderNotifications() {
   }
 
   const notifications = state.notifications || [];
-  const unreadCount = notifications.filter((item) => !isNotificationRead(item)).length;
+  const unreadNotifications = notifications.filter((item) => !isNotificationRead(item));
+  const unreadCount = unreadNotifications.length;
   el.notificationsBadge.textContent = String(unreadCount);
   el.notificationsBadge.toggleAttribute("hidden", unreadCount < 1);
   el.notificationsMarkAll?.toggleAttribute("hidden", unreadCount < 1);
 
-  if (!notifications.length) {
+  if (!unreadNotifications.length) {
     el.notificationsList.innerHTML = '<p class="notification-empty tiny muted">No new episodes right now.</p>';
     return;
   }
 
-  el.notificationsList.innerHTML = notifications.map((item) => `
+  el.notificationsList.innerHTML = unreadNotifications.map((item) => `
     <div class="notification-item${isNotificationRead(item) ? " read" : ""}" data-read-id="${escapeHtml(item.readId)}">
       <a class="notification-link" href="${escapeHtml(item.href)}" data-id="${item.id}" data-season="${item.season}" data-episode="${item.episode}">
         <span class="notification-copy">
@@ -1523,22 +1556,17 @@ function renderSearchSuggestions(items) {
       .filter(Boolean)
       .join(" | ");
     const poster = item.poster || "";
+    const href = buildWatchHref(item.id, item.mediaType, 1, 1);
     return `
-      <button class="search-suggestion" type="button" data-id="${item.id}" data-type="${item.mediaType}" style="animation-delay:${index * 35}ms">
+      <a class="search-suggestion" href="${escapeHtml(href)}" data-id="${item.id}" data-type="${item.mediaType}" style="animation-delay:${index * 35}ms">
         <img class="search-suggestion-poster" src="${escapeHtml(poster)}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" />
         <span>
           <span class="search-suggestion-title">${escapeHtml(item.title)}</span>
           <span class="search-suggestion-sub">${escapeHtml(subtitle)}</span>
         </span>
-      </button>
+      </a>
     `;
   }).join("");
-
-  [...el.searchSuggestions.querySelectorAll(".search-suggestion")].forEach((node) => {
-    node.addEventListener("click", () => {
-      openWatchPage(Number(node.dataset.id), node.dataset.type, 1, 1);
-    });
-  });
 
   el.searchSuggestions.removeAttribute("hidden");
 }

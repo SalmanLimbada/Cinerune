@@ -34,9 +34,11 @@
         </button>
         <div id="notificationsMenu" class="account-menu notifications-menu" hidden>
           <div class="notifications-head">
-            <strong>Notifications</strong>
-            <a class="mini-action-btn" href="./inbox.html">Inbox</a>
-            <button id="notificationsMarkAll" class="mini-action-btn" type="button">Read</button>
+            <div class="notifications-head-left">
+              <strong>Notifications</strong>
+              <a class="mini-action-btn" href="./inbox.html">Inbox</a>
+              <button id="notificationsMarkAll" class="mini-action-btn" type="button">Read all</button>
+            </div>
           </div>
           <div id="notificationsList" class="notifications-list"></div>
         </div>
@@ -47,11 +49,36 @@
           <span id="authButtonLabel">Login</span>
         </button>
         <div id="accountMenu" class="account-menu" hidden>
-          <a class="account-menu-item" href="./index.html?modal=settings">Settings</a>
-          <a class="account-menu-item" href="./inbox.html">Inbox</a>
-          <a class="account-menu-item" href="./lists.html">Bookmarks</a>
-          <a class="account-menu-item" href="./lists.html?view=continue">Continue Watching</a>
-          <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">Sign Out</button>
+            <a class="account-menu-item" href="./index.html?modal=settings">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 6h16"/><circle cx="9" cy="6" r="2"/><path d="M4 12h16"/><circle cx="15" cy="12" r="2"/><path d="M4 18h16"/><circle cx="8" cy="18" r="2"/></svg>
+              </span>
+              <span>Settings</span>
+            </a>
+            <a class="account-menu-item" href="./inbox.html">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/></svg>
+              </span>
+              <span>Inbox</span>
+            </a>
+            <a class="account-menu-item" href="./lists.html">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M6 4h12v16l-6-4-6 4z"/></svg>
+              </span>
+              <span>Bookmarks</span>
+            </a>
+            <a class="account-menu-item" href="./lists.html?view=continue">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>
+              </span>
+              <span>Continue Watching</span>
+            </a>
+            <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M10 5v14"/><path d="M16 12H4"/><path d="M16 12l-4-4"/><path d="M16 12l-4 4"/></svg>
+              </span>
+              <span>Sign Out</span>
+            </button>
         </div>
       </div>
     </header>
@@ -68,6 +95,10 @@
         <div id="inboxList" class="notifications-list inbox-list"></div>
       </section>
     </main>
+
+    <footer class="site-notice">
+      This site does not host any files on its own servers. It indexes and links to media hosted by third-party services.
+    </footer>
 
     <script src="config.js"></script>
     <script>

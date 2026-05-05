@@ -53,6 +53,10 @@ async function boot() {
     return;
   }
 
+  await renderBookmarksPage();
+}
+
+async function renderBookmarksPage() {
   const bookmarks = Object.values(readJson(getBookmarksKey(state.session), {}))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
@@ -67,10 +71,10 @@ async function boot() {
 
   const hydrated = (await hydrateBookmarks(bookmarks)).filter((item) => !isSensitiveCatalogItem(item));
 
-  renderList(el.listWatching, hydrated.filter((item) => item.status === "watching"));
-  renderList(el.listWatched, hydrated.filter((item) => item.status === "watched"));
-  renderList(el.listPlan, hydrated.filter((item) => item.status === "plan"));
-  renderList(el.listDropped, hydrated.filter((item) => item.status === "dropped"));
+  renderList(el.listWatching, hydrated.filter((item) => item.status === "watching"), { allowRemove: true });
+  renderList(el.listWatched, hydrated.filter((item) => item.status === "watched"), { allowRemove: true });
+  renderList(el.listPlan, hydrated.filter((item) => item.status === "plan"), { allowRemove: true });
+  renderList(el.listDropped, hydrated.filter((item) => item.status === "dropped"), { allowRemove: true });
 
   el.bookmarksStatus.textContent = `${hydrated.length} saved title${hydrated.length === 1 ? "" : "s"}.`;
 }
@@ -174,7 +178,7 @@ function renderList(container, entries, options = {}) {
 
   entries.forEach((item) => {
     const node = el.posterCardTemplate.content.firstElementChild.cloneNode(true);
-    const button = node.querySelector(".poster-btn");
+    const link = node.querySelector(".poster-btn");
     const image = node.querySelector(".poster-img");
     const title = node.querySelector(".poster-title");
     const sub = node.querySelector(".poster-sub");
@@ -182,23 +186,51 @@ function renderList(container, entries, options = {}) {
     setPosterImage(image, item);
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
-    sub.textContent = item.progressMeta || [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
+    if (item.progressMeta) {
+      sub.textContent = item.progressMeta;
+      sub.classList.add("continue-meta");
+    } else {
+      sub.classList.remove("continue-meta");
+      sub.textContent = [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
+    }
     if (item.progressMeta) {
       const progressTrack = document.createElement("span");
       progressTrack.className = "continue-progress";
       progressTrack.innerHTML = `<span style="width:${Math.max(0, Math.min(100, Number(item.progressPercent || 0)))}%"></span>`;
-      button.appendChild(progressTrack);
+      link.appendChild(progressTrack);
     }
 
-    button.addEventListener("click", () => {
-      openWatchPage(item.id, item.mediaType, item.season, item.episode, options.resume);
-    });
+    if (options.allowRemove) {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "continue-remove-btn";
+      removeBtn.setAttribute("aria-label", `Remove ${item.title} from bookmarks`);
+      removeBtn.textContent = "×";
+      removeBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        removeBookmarkEntry(item.mediaType, item.id);
+      });
+      node.appendChild(removeBtn);
+    }
+
+    const href = buildWatchHref(item.id, item.mediaType, item.season, item.episode, options.resume);
+    if (link) link.href = href;
 
     fragment.appendChild(node);
   });
 
   container.appendChild(fragment);
   initDragScroll();
+}
+
+function removeBookmarkEntry(mediaType, id) {
+  const key = `${mediaType === "tv" ? "tv" : "movie"}:${Number(id)}`;
+  const bookmarks = readJson(getBookmarksKey(state.session), {});
+  if (!bookmarks?.[key]) return;
+  delete bookmarks[key];
+  localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(bookmarks));
+  void renderBookmarksPage();
 }
 
 function buildPosterPlaceholder(title) {
@@ -239,6 +271,20 @@ function openWatchPage(id, mediaType, season = 1, episode = 1, resume = false) {
     url.searchParams.set("resume", "1");
   }
   window.location.href = url.toString();
+}
+
+function buildWatchHref(id, mediaType, season = 1, episode = 1, resume = false) {
+  const url = new URL("./watch.html", window.location.href);
+  url.searchParams.set("id", String(id));
+  url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
+  if (mediaType === "tv") {
+    url.searchParams.set("s", String(season || 1));
+    url.searchParams.set("e", String(episode || 1));
+  }
+  if (resume) {
+    url.searchParams.set("resume", "1");
+  }
+  return url.toString();
 }
 
 function setPosterImage(image, item) {

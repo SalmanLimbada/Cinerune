@@ -1,5 +1,5 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession } from "./auth-client.js";
-import { avatarDataUri, avatarSrcById, normalizeAvatarId } from "./shared-ui.js?v=20260502-notifications1";
+import { avatarDataUri, avatarSrcById, normalizeAvatarId, openSettingsModal } from "./shared-ui.js?v=20260502-notifications1";
 import { initHeaderNotifications } from "./notifications.js?v=20260502-notifications1";
 import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
 import {
@@ -14,6 +14,7 @@ import {
 } from "./catalog.js?v=20260501-fix1";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
+const VIDSRC_BASE = "https://vidsrc-embed.ru/embed";
 const settingsKey = "cinerune:settings";
 const legacyProgressKey = "cinerune:progress";
 const progressBaseKey = "cinerune:progress";
@@ -69,7 +70,9 @@ const el = {
   reportDialog: document.getElementById("reportDialog"),
   reportForm: document.getElementById("reportForm"),
   reportMessage: document.getElementById("reportMessage"),
-  cancelReport: document.getElementById("cancelReport")
+  cancelReport: document.getElementById("cancelReport"),
+  playerServer1: document.getElementById("playerServer1"),
+  playerServer2: document.getElementById("playerServer2")
 };
 
 const query = new URLSearchParams(window.location.search);
@@ -79,6 +82,7 @@ const state = {
   id: Number(query.get("id")) || 0,
   season: Number(query.get("s")) || 1,
   episode: Number(query.get("e")) || 1,
+  playerServer: "vidking",
   resumeMode: query.get("resume") === "1",
   resumeAttempted: false,
   resumeTarget: 0,
@@ -88,6 +92,10 @@ const state = {
   resumeConfirmed: false,
   lastPlayerEventAt: 0,
   lastPlaybackTime: 0,
+  playerSupportsCommands: true,
+  serverProgressTimer: null,
+  serverProgressStartedAt: 0,
+  serverProgressBaseTimestamp: 0,
   settings: readJson(settingsKey, {
     autoPlay: false,
     nextEpisode: true,
@@ -115,6 +123,7 @@ async function boot() {
 
 
   bindEvents();
+  updatePlayerServerToggle();
   initHeaderNotifications();
   if (el.bookmarkMenu) {
     el.bookmarkMenu.setAttribute("hidden", "");
@@ -142,6 +151,13 @@ function bindEvents() {
   el.prevEpisodeBtn.addEventListener("click", playPrevEpisode);
   el.nextEpisodeBtn.addEventListener("click", playNextEpisode);
 
+  if (el.playerServer1) {
+    el.playerServer1.addEventListener("click", () => setPlayerServer("vidking"));
+  }
+  if (el.playerServer2) {
+    el.playerServer2.addEventListener("click", () => setPlayerServer("vidsrc"));
+  }
+
   el.seasonSelect.addEventListener("change", async () => {
     state.season = Number(el.seasonSelect.value) || 1;
     state.episode = 1;
@@ -163,7 +179,7 @@ function bindEvents() {
   if (el.watchAccountSettings) {
     el.watchAccountSettings.addEventListener("click", () => {
       closeWatchAccountMenu();
-        window.location.href = "./index.html?modal=settings";
+      openSettingsModal();
     });
   }
 
@@ -319,9 +335,11 @@ async function refillEpisodeGrid() {
   });
 
   el.episodeGrid.appendChild(fragment);
-  el.episodeCountText.textContent = totalEpisodes > 0
-    ? `Season ${state.season} has ${totalEpisodes} episode${totalEpisodes === 1 ? "" : "s"}.`
-    : `Season ${state.season} has no episodes yet.`;
+  if (el.episodeCountText) {
+    el.episodeCountText.textContent = totalEpisodes > 0
+      ? `Season ${state.season} has ${totalEpisodes} episode${totalEpisodes === 1 ? "" : "s"}.`
+      : `Season ${state.season} has no episodes yet.`;
+  }
 }
 
 function playEpisode(episode) {
@@ -379,24 +397,16 @@ async function syncEpisodeSelection() {
 
 function loadPlayer() {
   clearResumeTimers();
+  stopFallbackProgress();
   state.lastPlayerEventAt = 0;
   state.lastPlaybackTime = 0;
   state.resumeConfirmed = false;
   state.resumeSeekAttempts = 0;
   el.playerFrame.src = "";
-  const baseUrl = state.mediaType === "movie"
-    ? `${PLAYER_BASE}/movie/${state.id}`
-    : `${PLAYER_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
+  const serverId = normalizeServerId(state.playerServer);
+  state.playerSupportsCommands = serverId === "vidking";
 
-  const url = new URL(baseUrl);
-  if (state.settings.autoPlay || state.resumeMode) {
-    url.searchParams.set("autoPlay", "true");
-  }
-
-  if (state.mediaType === "tv") {
-    url.searchParams.set("nextEpisode", "true");
-    url.searchParams.set("episodeSelector", "true");
-  }
+  const url = buildPlayerUrl(serverId);
 
   const resume = state.resumeMode && !state.resumeAttempted ? getSavedProgress() : null;
   let appliedResume = false;
@@ -421,6 +431,8 @@ function loadPlayer() {
 
   el.playerFrame.src = url.toString();
   scheduleResumeSeek(appliedResume);
+  ensureProgressEntry();
+  startFallbackProgress();
 
     // Do not show a transient "Player loaded" message to users.
 }
@@ -437,7 +449,7 @@ function clearResumeTimers() {
 }
 
 function scheduleResumeSeek(appliedResume) {
-  if (!state.resumeMode || !appliedResume) return;
+  if (!state.playerSupportsCommands || !state.resumeMode || !appliedResume) return;
 
   const startedAt = Date.now();
   const target = Number(state.resumeTarget || 0);
@@ -473,6 +485,7 @@ function scheduleResumeSeek(appliedResume) {
 }
 
 function sendPlayerCommand(command, payload = {}) {
+  if (!state.playerSupportsCommands) return;
   const target = el.playerFrame?.contentWindow;
   if (!target) return;
 
@@ -490,9 +503,8 @@ async function renderRelated() {
     const card = document.createElement("article");
     card.className = "poster-card";
 
-    const button = document.createElement("button");
-    button.className = "poster-btn";
-    button.type = "button";
+    const link = document.createElement("a");
+    link.className = "poster-btn";
 
     const image = document.createElement("img");
     image.className = "poster-img";
@@ -516,20 +528,18 @@ async function renderRelated() {
     sub.textContent = `${item.mediaType === "movie" ? "Movie" : "TV"}${item.year ? ` | ${item.year}` : ""}`;
 
     meta.append(title, sub);
-    button.append(image, badge, meta);
+    link.append(image, badge, meta);
 
-    button.addEventListener("click", () => {
-      const url = new URL("./watch.html", window.location.href);
-      url.searchParams.set("id", String(item.id));
-      url.searchParams.set("type", item.mediaType);
-      if (item.mediaType === "tv") {
-        url.searchParams.set("s", "1");
-        url.searchParams.set("e", "1");
-      }
-      window.location.href = url.toString();
-    });
+    const url = new URL("./watch.html", window.location.href);
+    url.searchParams.set("id", String(item.id));
+    url.searchParams.set("type", item.mediaType);
+    if (item.mediaType === "tv") {
+      url.searchParams.set("s", "1");
+      url.searchParams.set("e", "1");
+    }
+    link.href = url.toString();
 
-    card.appendChild(button);
+    card.appendChild(link);
     fragment.appendChild(card);
   });
 
@@ -641,6 +651,10 @@ function syncBookmarkButton() {
   if (!el.bookmarkTrigger || !el.bookmarkMenu || !state.item) return;
 
   const current = state.bookmarks[`${state.mediaType}:${state.id}`] || null;
+  const removeOption = el.bookmarkMenu.querySelector(".bookmark-clear");
+  if (removeOption) {
+    removeOption.toggleAttribute("hidden", !current);
+  }
   el.bookmarkTrigger.textContent = "Bookmark";
   el.bookmarkTrigger.classList.toggle("active", Boolean(current) || !el.bookmarkMenu.hasAttribute("hidden"));
   el.bookmarkTrigger.setAttribute("aria-expanded", el.bookmarkMenu.hasAttribute("hidden") ? "false" : "true");
@@ -675,6 +689,7 @@ async function onPlayerMessage(event) {
   if (parsed?.type !== "PLAYER_EVENT" || !parsed?.data) return;
   const data = parsed.data;
   if (!data.id || !data.mediaType) return;
+  stopFallbackProgress();
 
   const mediaType = data.mediaType === "tv" ? "tv" : "movie";
   const id = Number(data.id);
@@ -735,6 +750,123 @@ async function onPlayerMessage(event) {
     }, 8000);
     await playNextEpisode();
   }
+}
+
+function startFallbackProgress() {
+  if (state.playerSupportsCommands) return;
+  if (state.serverProgressTimer) return;
+  const key = `${state.mediaType}:${state.id}:${state.season}:${state.episode}`;
+  const existing = state.progress[key] || null;
+  state.serverProgressBaseTimestamp = Number(existing?.timestamp || 0);
+  state.serverProgressStartedAt = Date.now();
+
+  state.serverProgressTimer = window.setInterval(() => {
+    if (state.playerSupportsCommands || state.lastPlayerEventAt) {
+      stopFallbackProgress();
+      return;
+    }
+    const elapsedSeconds = Math.floor((Date.now() - state.serverProgressStartedAt) / 1000);
+    if (elapsedSeconds < 25) return;
+    const timestamp = Math.max(0, state.serverProgressBaseTimestamp + elapsedSeconds);
+    const progress = Math.max(Number(existing?.progress || 0), Math.min(95, Math.round(timestamp / 60)));
+    state.progress[key] = {
+      mediaType: state.mediaType,
+      id: state.id,
+      season: state.season,
+      episode: state.episode,
+      timestamp,
+      duration: Number(existing?.duration || 0),
+      progress,
+      updatedAt: Date.now(),
+      title: state.item?.title || titleById(state.id, state.mediaType) || `Title ${state.id}`,
+      poster: state.item?.poster || posterById(state.id, state.mediaType) || ""
+    };
+    localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
+  }, 15000);
+}
+
+function stopFallbackProgress() {
+  if (state.serverProgressTimer) {
+    window.clearInterval(state.serverProgressTimer);
+    state.serverProgressTimer = null;
+  }
+  state.serverProgressStartedAt = 0;
+  state.serverProgressBaseTimestamp = 0;
+}
+
+function normalizeServerId(value) {
+  return value === "vidsrc" ? "vidsrc" : "vidking";
+}
+
+function setPlayerServer(serverId) {
+  const normalized = normalizeServerId(serverId);
+  if (state.playerServer === normalized) return;
+  state.playerServer = normalized;
+  updatePlayerServerToggle();
+  loadPlayer();
+}
+
+function updatePlayerServerToggle() {
+  const normalized = normalizeServerId(state.playerServer);
+  el.playerServer1?.classList.toggle("active", normalized === "vidking");
+  el.playerServer2?.classList.toggle("active", normalized === "vidsrc");
+}
+
+function buildPlayerUrl(serverId) {
+  const normalized = normalizeServerId(serverId);
+  if (normalized === "vidsrc") {
+    const base = `${VIDSRC_BASE}/${state.mediaType === "movie" ? "movie" : "tv"}`;
+    const url = new URL(base);
+    url.searchParams.set("tmdb", String(state.id));
+    if (state.mediaType === "tv") {
+      url.searchParams.set("season", String(state.season));
+      url.searchParams.set("episode", String(state.episode));
+      if (state.settings.nextEpisode) {
+        url.searchParams.set("autonext", "1");
+      }
+    }
+    if (state.settings.autoPlay || state.resumeMode) {
+      url.searchParams.set("autoplay", "1");
+    } else {
+      url.searchParams.set("autoplay", "0");
+    }
+    return url;
+  }
+
+  const baseUrl = state.mediaType === "movie"
+    ? `${PLAYER_BASE}/movie/${state.id}`
+    : `${PLAYER_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
+  const url = new URL(baseUrl);
+  if (state.settings.autoPlay || state.resumeMode) {
+    url.searchParams.set("autoPlay", "true");
+  }
+  if (state.mediaType === "tv") {
+    url.searchParams.set("nextEpisode", "true");
+    url.searchParams.set("episodeSelector", "true");
+  }
+  return url;
+}
+
+function ensureProgressEntry() {
+  if (!state.item) return;
+  const key = `${state.mediaType}:${state.id}:${state.season}:${state.episode}`;
+  const existing = state.progress[key];
+  if (existing && (Number(existing.progress || 0) > 0 || Number(existing.timestamp || 0) > 0)) return;
+
+  state.progress[key] = {
+    mediaType: state.mediaType,
+    id: state.id,
+    season: state.season,
+    episode: state.episode,
+    timestamp: Number(existing?.timestamp || 0),
+    duration: Number(existing?.duration || 0),
+    progress: Number(existing?.progress || 0),
+    updatedAt: Date.now(),
+    title: state.item?.title || titleById(state.id, state.mediaType) || `Title ${state.id}`,
+    poster: state.item?.poster || posterById(state.id, state.mediaType) || ""
+  };
+
+  localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
 }
 
 async function initAuth() {

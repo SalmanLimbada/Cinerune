@@ -11,7 +11,7 @@
     <link rel="icon" href="./favicon.svg?v=20260430" type="image/svg+xml" sizes="any">
     <link rel="stylesheet" href="styles.css?v=20260502-ui1" />
   </head>
-  <body class="home-body">
+  <body class="home-body is-home">
     <div class="home-atmosphere" aria-hidden="true"></div>
 
     <header class="home-topbar">
@@ -32,7 +32,9 @@
       </nav>
 
       <div class="header-actions">
-        <a id="homeListsLink" class="pill-btn ghost" href="./lists.html" hidden>Bookmarks</a>
+        <a id="homeListsLink" class="icon-pill bookmark-pill" href="./lists.html" aria-label="Bookmarks" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16l-6-4-6 4z"/></svg>
+        </a>
         <div id="notificationsWrap" class="account-menu-wrap" hidden>
           <button id="notificationsBtn" class="icon-pill" type="button" aria-label="Notifications" aria-expanded="false">
             <span class="notif-icon" aria-hidden="true">&#128276;</span>
@@ -40,9 +42,11 @@
           </button>
           <div id="notificationsMenu" class="account-menu notifications-menu" hidden>
             <div class="notifications-head">
-              <strong>Notifications</strong>
-              <a class="mini-action-btn" href="./inbox.html">Inbox</a>
-              <button id="notificationsMarkAll" class="mini-action-btn" type="button">Read</button>
+              <div class="notifications-head-left">
+                <strong>Notifications</strong>
+                <a class="mini-action-btn" href="./inbox.html">Inbox</a>
+                <button id="notificationsMarkAll" class="mini-action-btn" type="button">Read all</button>
+              </div>
             </div>
             <div id="notificationsList" class="notifications-list"></div>
           </div>
@@ -53,11 +57,36 @@
             <span id="authButtonLabel">Login</span>
           </button>
           <div id="accountMenu" class="account-menu" hidden>
-            <button id="openAccountSettings" class="account-menu-item" type="button">Settings</button>
-            <a class="account-menu-item" href="./inbox.html">Inbox</a>
-            <a class="account-menu-item" href="./lists.html">Bookmarks</a>
-            <a id="continueWatchingLink" class="account-menu-item" href="./index.html#continueSection">Continue Watching</a>
-            <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">Sign Out</button>
+            <button id="openAccountSettings" class="account-menu-item" type="button">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 6h16"/><circle cx="9" cy="6" r="2"/><path d="M4 12h16"/><circle cx="15" cy="12" r="2"/><path d="M4 18h16"/><circle cx="8" cy="18" r="2"/></svg>
+              </span>
+              <span>Settings</span>
+            </button>
+            <a class="account-menu-item" href="./inbox.html">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/></svg>
+              </span>
+              <span>Inbox</span>
+            </a>
+            <a class="account-menu-item" href="./lists.html">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M6 4h12v16l-6-4-6 4z"/></svg>
+              </span>
+              <span>Bookmarks</span>
+            </a>
+            <a id="continueWatchingLink" class="account-menu-item" href="./index.html#continueSection">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>
+              </span>
+              <span>Continue Watching</span>
+            </a>
+            <button id="signOutMenuBtn" class="account-menu-item destructive" type="button">
+              <span class="menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M10 5v14"/><path d="M16 12H4"/><path d="M16 12l-4-4"/><path d="M16 12l-4 4"/></svg>
+              </span>
+              <span>Sign Out</span>
+            </button>
           </div>
         </div>
       </div>
@@ -230,21 +259,21 @@
       <section id="continueSection" class="home-row" hidden>
         <div class="row-head">
           <h2>Continue Watching</h2>
+          <div class="row-actions">
+            <button id="continuePrevBtn" class="arrow-btn" type="button" aria-label="Scroll continue watching left">&#8592;</button>
+            <button id="continueNextBtn" class="arrow-btn" type="button" aria-label="Scroll continue watching right">&#8594;</button>
+          </div>
         </div>
         <div id="continueGrid" class="poster-row"></div>
-      </section>
-
-      <section id="searchResultsSection" class="home-row" hidden>
-        <div class="row-head compact">
-          <h3>Top Results</h3>
-        </div>
-        <div id="searchResultsGrid" class="poster-row"></div>
-        <div id="searchPagination" class="pager" hidden></div>
       </section>
 
       <section id="recommendedSection" class="home-row">
         <div class="row-head">
           <h2>Recommended</h2>
+          <div class="row-actions">
+            <button id="recommendedPrevBtn" class="arrow-btn" type="button" aria-label="Scroll recommended left">&#8592;</button>
+            <button id="recommendedNextBtn" class="arrow-btn" type="button" aria-label="Scroll recommended right">&#8594;</button>
+          </div>
         </div>
         <div id="recommendedGrid" class="poster-row"></div>
       </section>
@@ -252,6 +281,10 @@
       <section id="trendingSection" class="home-row">
         <div class="row-head">
           <h2>Trending</h2>
+          <div class="row-actions">
+            <button id="trendingPrevBtn" class="arrow-btn" type="button" aria-label="Scroll trending left">&#8592;</button>
+            <button id="trendingNextBtn" class="arrow-btn" type="button" aria-label="Scroll trending right">&#8594;</button>
+          </div>
         </div>
         <div id="trendingGrid" class="poster-row"></div>
       </section>
@@ -259,6 +292,10 @@
       <section id="popularSection" class="home-row">
         <div class="row-head">
           <h2>Popular</h2>
+          <div class="row-actions">
+            <button id="popularPrevBtn" class="arrow-btn" type="button" aria-label="Scroll popular left">&#8592;</button>
+            <button id="popularNextBtn" class="arrow-btn" type="button" aria-label="Scroll popular right">&#8594;</button>
+          </div>
         </div>
         <div id="popularGrid" class="poster-row"></div>
       </section>
@@ -266,16 +303,20 @@
 
     <template id="posterCardTemplate">
       <article class="poster-card">
-        <button class="poster-btn" type="button">
+        <a class="poster-btn" href="">
           <img class="poster-img" alt="" loading="lazy" decoding="async" />
           <span class="badge-hd">HD</span>
           <div class="poster-meta">
             <h4 class="poster-title"></h4>
             <p class="poster-sub"></p>
           </div>
-        </button>
+        </a>
       </article>
     </template>
+
+    <footer class="site-notice">
+      This site does not host any files on its own servers. It indexes and links to media hosted by third-party services.
+    </footer>
 
     <script src="config.js"></script>
     <script>

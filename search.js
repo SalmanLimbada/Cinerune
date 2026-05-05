@@ -84,7 +84,7 @@ function renderPosterCards(items) {
 
   items.forEach((item) => {
     const node = el.posterCardTemplate.content.firstElementChild.cloneNode(true);
-    const button = node.querySelector(".poster-btn");
+    const link = node.querySelector(".poster-btn");
     const image = node.querySelector(".poster-img");
     const title = node.querySelector(".poster-title");
     const sub = node.querySelector(".poster-sub");
@@ -94,16 +94,14 @@ function renderPosterCards(items) {
     title.textContent = item.title;
     sub.textContent = [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
 
-    button.addEventListener("click", () => {
-      const url = new URL("./watch.html", window.location.href);
-      url.searchParams.set("id", String(item.id));
-      url.searchParams.set("type", item.mediaType === "tv" ? "tv" : "movie");
-      if (item.mediaType === "tv") {
-        url.searchParams.set("s", "1");
-        url.searchParams.set("e", "1");
-      }
-      window.location.href = url.toString();
-    });
+    const url = new URL("./watch.html", window.location.href);
+    url.searchParams.set("id", String(item.id));
+    url.searchParams.set("type", item.mediaType === "tv" ? "tv" : "movie");
+    if (item.mediaType === "tv") {
+      url.searchParams.set("s", "1");
+      url.searchParams.set("e", "1");
+    }
+    if (link) link.href = url.toString();
 
     fragment.appendChild(node);
   });
@@ -145,6 +143,27 @@ function renderPagination(term, current, totalPages) {
     const activeClass = entry.page === active ? " active" : "";
     return `<a class="pager-btn${activeClass}" href="${buildSearchHref(term, entry.page)}">${entry.label}</a>`;
   }).join("");
+  el.searchPagePagination.insertAdjacentHTML("beforeend", `
+    <span class="pager-jump">
+      <input class="pager-input" type="number" min="1" max="${total}" placeholder="#" aria-label="Go to page" />
+      <button class="pager-go" type="button" data-total="${total}">Go</button>
+    </span>
+  `);
+  const input = el.searchPagePagination.querySelector(".pager-input");
+  const goBtn = el.searchPagePagination.querySelector(".pager-go");
+  const jump = () => {
+    if (!input) return;
+    const nextPage = Math.max(1, Math.min(total, Number(input.value || 0)));
+    if (!nextPage) return;
+    window.location.href = buildSearchHref(term, nextPage);
+  };
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      jump();
+    }
+  });
+  goBtn?.addEventListener("click", jump);
   el.searchPagePagination.removeAttribute("hidden");
 }
 

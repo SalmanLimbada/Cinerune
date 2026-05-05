@@ -1,4 +1,4 @@
-import { clearStoredSession, ensureSession } from "./auth-client.js";
+import { apiRequest, authHeaders, clearStoredSession, ensureSession, setStoredSession } from "./auth-client.js";
 import { initHeaderNotifications } from "./notifications.js?v=20260502-notifications1";
 
 const avatarOptions = [
@@ -16,16 +16,28 @@ export function initSharedHeader() {
   const avatar = document.getElementById("authAvatarThumb");
   const label = document.getElementById("authButtonLabel");
   const signOut = document.getElementById("signOutMenuBtn");
+  const notificationsWrap = document.getElementById("notificationsWrap");
   let currentSession = null;
 
+  sharedHeaderRefs.avatar = avatar;
+  sharedHeaderRefs.label = label;
+
+  ensureAccountMenuIcons(accountMenu);
+  bindSettingsMenu(accountMenu, () => currentSession);
+  const headerActions = ensureHeaderActionsGroup();
+  const bookmarksLink = ensureBookmarksLink(headerActions || notificationsWrap || accountWrap);
+
   renderSharedAccount(avatar, label, null);
+  updateBookmarksLink(bookmarksLink, null);
 
   ensureSession().then((session) => {
     currentSession = session;
     renderSharedAccount(avatar, label, session);
+    updateBookmarksLink(bookmarksLink, session);
   }).catch(() => {
     currentSession = null;
     renderSharedAccount(avatar, label, null);
+    updateBookmarksLink(bookmarksLink, null);
   });
 
   accountBtn?.addEventListener("click", async () => {
@@ -59,6 +71,7 @@ export function initSharedHeader() {
     clearStoredSession();
     currentSession = null;
     renderSharedAccount(avatar, label, null);
+    updateBookmarksLink(bookmarksLink, null);
     accountMenu?.setAttribute("hidden", "");
     document.getElementById("notificationsWrap")?.setAttribute("hidden", "");
   });
@@ -71,6 +84,510 @@ export function initSharedHeader() {
   });
 
   initHeaderNotifications();
+}
+
+export function openSettingsModal() {
+  initSharedSettingsModal();
+  void openSharedSettingsModal();
+}
+
+const sharedHeaderRefs = {
+  avatar: null,
+  label: null
+};
+
+const settingsModalState = {
+  modal: null,
+  backdrop: null,
+  closeBtn: null,
+  hint: null,
+  signedInHint: null,
+  accountAvatar: null,
+  authUserEmail: null,
+  signOutBtn: null,
+  username: null,
+  email: null,
+  currentPassword: null,
+  password: null,
+  confirm: null,
+  saveUsername: null,
+  saveEmail: null,
+  savePassword: null,
+  avatarPicker: null,
+  actionToggles: [],
+  session: null
+};
+
+function bindSettingsMenu(menu, getSession) {
+  if (!menu) return;
+  initSharedSettingsModal();
+  const settingsItem = [...menu.querySelectorAll(".account-menu-item")].find((item) =>
+    String(item.textContent || "").trim().toLowerCase() === "settings"
+  );
+  if (!settingsItem) return;
+  settingsItem.addEventListener("click", async (event) => {
+    event.preventDefault();
+    const session = await ensureSession();
+    if (!session?.user) {
+      window.location.href = "./index.html?auth=login";
+      return;
+    }
+    settingsModalState.session = session;
+    await openSharedSettingsModal();
+  });
+}
+
+function initSharedSettingsModal() {
+  if (settingsModalState.modal) return;
+  const modal = document.createElement("section");
+  modal.className = "auth-modal";
+  modal.id = "sharedSettingsModal";
+  modal.setAttribute("hidden", "");
+  modal.innerHTML = `
+    <div class="auth-backdrop" data-settings-backdrop></div>
+    <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="sharedSettingsTitle">
+      <button class="auth-close" type="button" data-settings-close aria-label="Close settings">x</button>
+      <div class="account-grid">
+        <div class="settings-hero">
+          <img id="sharedAccountAvatar" class="account-avatar" alt="Selected avatar" />
+          <div>
+            <p class="settings-kicker">Account Settings</p>
+            <h2 id="sharedSettingsTitle">Profile and Security</h2>
+            <p class="tiny">Signed in as <strong id="sharedAuthUserEmail">-</strong></p>
+            <p id="sharedSignedInHint" class="tiny muted">You are signed in.</p>
+          </div>
+        </div>
+        <div class="account-actions">
+          <button id="sharedSignOutBtn" class="pill-btn ghost" type="button">Sign Out</button>
+        </div>
+
+        <div class="settings-action-list">
+          <button class="settings-action-toggle" type="button" data-settings-toggle="username" aria-expanded="false">
+            <span>
+              <strong>Change Username</strong>
+              <small>Update the name you use to sign in.</small>
+            </span>
+            <span class="settings-action-icon" aria-hidden="true">+</span>
+          </button>
+          <div class="settings-section" data-settings-panel="username" hidden>
+            <label>
+              <span>New Username</span>
+              <input id="sharedSettingsUsername" type="text" placeholder="new username" maxlength="24" autocomplete="username" />
+            </label>
+            <div class="account-actions">
+              <button id="sharedSaveUsername" class="pill-btn" type="button">Save Username</button>
+            </div>
+          </div>
+
+          <button class="settings-action-toggle" type="button" data-settings-toggle="email" aria-expanded="false">
+            <span>
+              <strong>Add Email</strong>
+              <small>Optional login backup if you forget your username.</small>
+            </span>
+            <span class="settings-action-icon" aria-hidden="true">+</span>
+          </button>
+          <div class="settings-section" data-settings-panel="email" hidden>
+            <label>
+              <span>Email Address</span>
+              <input id="sharedSettingsEmail" type="email" placeholder="you@example.com" maxlength="80" autocomplete="email" />
+            </label>
+            <div class="account-actions">
+              <button id="sharedSaveEmail" class="pill-btn" type="button">Save Email</button>
+            </div>
+          </div>
+
+          <button class="settings-action-toggle" type="button" data-settings-toggle="password" aria-expanded="false">
+            <span>
+              <strong>Change Password</strong>
+              <small>Old password required, new password entered twice.</small>
+            </span>
+            <span class="settings-action-icon" aria-hidden="true">+</span>
+          </button>
+          <div class="settings-section" data-settings-panel="password" hidden>
+            <label>
+              <span>Old Password</span>
+              <input id="sharedSettingsCurrentPassword" type="password" placeholder="current password" maxlength="128" autocomplete="off" />
+            </label>
+            <label>
+              <span>New Password</span>
+              <input id="sharedSettingsPassword" type="password" placeholder="new password" maxlength="128" autocomplete="new-password" />
+            </label>
+            <label>
+              <span>Confirm New Password</span>
+              <input id="sharedSettingsPasswordConfirm" type="password" placeholder="re-enter new password" maxlength="128" autocomplete="new-password" />
+            </label>
+            <div class="account-actions">
+              <button id="sharedSavePassword" class="pill-btn" type="button">Update Password</button>
+            </div>
+          </div>
+
+          <button class="settings-action-toggle" type="button" data-settings-toggle="avatar" aria-expanded="false">
+            <span>
+              <strong>Change Avatar</strong>
+              <small>Pick a character image for your profile.</small>
+            </span>
+            <span class="settings-action-icon" aria-hidden="true">+</span>
+          </button>
+          <div class="avatar-picker-block compact" data-settings-panel="avatar" hidden>
+            <div class="row-head compact">
+              <h3>Change Avatar</h3>
+            </div>
+            <div id="sharedAvatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
+          </div>
+        </div>
+
+        <p id="sharedSettingsHint" class="tiny muted"></p>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  settingsModalState.modal = modal;
+  settingsModalState.backdrop = modal.querySelector("[data-settings-backdrop]");
+  settingsModalState.closeBtn = modal.querySelector("[data-settings-close]");
+  settingsModalState.hint = modal.querySelector("#sharedSettingsHint");
+  settingsModalState.signedInHint = modal.querySelector("#sharedSignedInHint");
+  settingsModalState.accountAvatar = modal.querySelector("#sharedAccountAvatar");
+  settingsModalState.authUserEmail = modal.querySelector("#sharedAuthUserEmail");
+  settingsModalState.signOutBtn = modal.querySelector("#sharedSignOutBtn");
+  settingsModalState.username = modal.querySelector("#sharedSettingsUsername");
+  settingsModalState.email = modal.querySelector("#sharedSettingsEmail");
+  settingsModalState.currentPassword = modal.querySelector("#sharedSettingsCurrentPassword");
+  settingsModalState.password = modal.querySelector("#sharedSettingsPassword");
+  settingsModalState.confirm = modal.querySelector("#sharedSettingsPasswordConfirm");
+  settingsModalState.saveUsername = modal.querySelector("#sharedSaveUsername");
+  settingsModalState.saveEmail = modal.querySelector("#sharedSaveEmail");
+  settingsModalState.savePassword = modal.querySelector("#sharedSavePassword");
+  settingsModalState.avatarPicker = modal.querySelector("#sharedAvatarPicker");
+  settingsModalState.actionToggles = [...modal.querySelectorAll("[data-settings-toggle]")];
+
+  settingsModalState.backdrop?.addEventListener("click", closeSharedSettingsModal);
+  settingsModalState.closeBtn?.addEventListener("click", closeSharedSettingsModal);
+  settingsModalState.saveUsername?.addEventListener("click", saveSharedUsername);
+  settingsModalState.saveEmail?.addEventListener("click", saveSharedEmail);
+  settingsModalState.savePassword?.addEventListener("click", saveSharedPassword);
+  settingsModalState.signOutBtn?.addEventListener("click", signOutSharedSession);
+  settingsModalState.actionToggles.forEach((button) => {
+    button.addEventListener("click", () => toggleSharedSettingsPanel(button.dataset.settingsToggle));
+  });
+}
+
+async function openSharedSettingsModal() {
+  if (!settingsModalState.modal) return;
+  const session = settingsModalState.session || await ensureSession();
+  if (!session?.user) {
+    window.location.href = "./index.html?auth=login";
+    return;
+  }
+  settingsModalState.session = session;
+  settingsModalState.modal.removeAttribute("hidden");
+  const meta = session.user.user_metadata || {};
+  if (settingsModalState.username) settingsModalState.username.value = meta.username || "";
+  if (settingsModalState.email) settingsModalState.email.value = displayEmail(session.user.email) || "";
+  if (settingsModalState.authUserEmail) {
+    settingsModalState.authUserEmail.textContent = displayEmail(session.user.email)
+      || meta.username
+      || "Account";
+  }
+  if (settingsModalState.accountAvatar) {
+    const avatarId = normalizeAvatarId(meta.avatarId || readJson("cinerune:avatar-choice", "luffy"));
+    settingsModalState.accountAvatar.referrerPolicy = "no-referrer";
+    settingsModalState.accountAvatar.onerror = () => {
+      settingsModalState.accountAvatar.onerror = null;
+      settingsModalState.accountAvatar.src = avatarDataUri({ id: avatarId, label: "Avatar" });
+    };
+    settingsModalState.accountAvatar.src = avatarSrcById(avatarId);
+  }
+  renderSharedAvatarPicker(meta.avatarId || readJson("cinerune:avatar-choice", "luffy"));
+  closeSharedSettingsPanels();
+  setSharedSettingsHint("");
+}
+
+function closeSharedSettingsModal() {
+  if (!settingsModalState.modal) return;
+  settingsModalState.modal.setAttribute("hidden", "");
+}
+
+function toggleSharedSettingsPanel(panelName) {
+  if (!panelName || !settingsModalState.modal) return;
+  const targetPanel = settingsModalState.modal.querySelector(`[data-settings-panel="${cssEscape(panelName)}"]`);
+  const targetButton = settingsModalState.modal.querySelector(`[data-settings-toggle="${cssEscape(panelName)}"]`);
+  if (!targetPanel || !targetButton) return;
+  const willOpen = targetPanel.hasAttribute("hidden");
+  closeSharedSettingsPanels();
+  if (willOpen) {
+    targetPanel.removeAttribute("hidden");
+    targetButton.setAttribute("aria-expanded", "true");
+  }
+}
+
+function closeSharedSettingsPanels() {
+  if (!settingsModalState.modal) return;
+  settingsModalState.modal.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+    panel.setAttribute("hidden", "");
+  });
+  settingsModalState.modal.querySelectorAll("[data-settings-toggle]").forEach((button) => {
+    button.setAttribute("aria-expanded", "false");
+  });
+}
+
+function renderSharedAvatarPicker(activeId) {
+  if (!settingsModalState.avatarPicker) return;
+  const normalized = normalizeAvatarId(activeId);
+  settingsModalState.avatarPicker.innerHTML = avatarOptions.map((avatar) => `
+    <button class="avatar-option${avatar.id === normalized ? " active" : ""}" type="button" data-avatar="${avatar.id}" aria-label="Select ${escapeHtml(avatar.label)} avatar">
+      <img class="avatar-preview" src="${avatarSrcById(avatar.id)}" alt="" aria-hidden="true" loading="eager" decoding="async" referrerpolicy="no-referrer" />
+      <span>${escapeHtml(avatar.label)}</span>
+    </button>
+  `).join("");
+
+  [...settingsModalState.avatarPicker.querySelectorAll(".avatar-option")].forEach((node) => {
+    node.addEventListener("click", () => {
+      const nextId = normalizeAvatarId(node.dataset.avatar);
+      persistSharedAvatarChoice(nextId);
+    });
+  });
+}
+
+async function persistSharedAvatarChoice(avatarId) {
+  const normalized = normalizeAvatarId(avatarId);
+  localStorage.setItem("cinerune:avatar-choice", JSON.stringify(normalized));
+  const session = await ensureSession();
+  if (!session?.user) return;
+  try {
+    const updated = await apiRequest("/auth/update", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: {
+        avatarId: normalized,
+        username: session.user.user_metadata?.username || undefined
+      }
+    });
+    applySharedSessionUpdate(session, updated?.user || updated, { avatarId: normalized });
+    if (settingsModalState.accountAvatar) {
+      settingsModalState.accountAvatar.src = avatarSrcById(normalized);
+    }
+    renderSharedAvatarPicker(normalized);
+  } catch (error) {
+    setSharedSettingsHint(`Update failed: ${error.message}`);
+  }
+}
+
+function signOutSharedSession() {
+  clearStoredSession();
+  settingsModalState.session = null;
+  renderSharedAccount(sharedHeaderRefs.avatar, sharedHeaderRefs.label, null);
+  closeSharedSettingsModal();
+}
+
+function setSharedSettingsHint(message) {
+  if (settingsModalState.hint) settingsModalState.hint.textContent = message;
+}
+
+async function saveSharedUsername() {
+  const session = await ensureSession();
+  if (!session?.user) {
+    setSharedSettingsHint("Sign in first.");
+    return;
+  }
+  const username = normalizeUsername(settingsModalState.username?.value);
+  if (!username) {
+    setSharedSettingsHint("Provide a username with 3-24 letters, numbers, dots, underscores, or dashes.");
+    return;
+  }
+  try {
+    const updated = await apiRequest("/auth/update", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: { username }
+    });
+    applySharedSessionUpdate(session, updated?.user || updated, { username });
+    setSharedSettingsHint("Username updated.");
+  } catch (error) {
+    setSharedSettingsHint(`Update failed: ${error.message}`);
+  }
+}
+
+async function saveSharedEmail() {
+  const session = await ensureSession();
+  if (!session?.user) {
+    setSharedSettingsHint("Sign in first.");
+    return;
+  }
+  const email = normalizeEmail(settingsModalState.email?.value || "", true);
+  if (!email) {
+    setSharedSettingsHint("Enter a valid email address.");
+    return;
+  }
+  try {
+    const updated = await apiRequest("/auth/update", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: { email }
+    });
+    applySharedSessionUpdate(session, updated?.user || updated, { email });
+    setSharedSettingsHint("Email saved.");
+  } catch (error) {
+    setSharedSettingsHint(`Update failed: ${error.message}`);
+  }
+}
+
+async function saveSharedPassword() {
+  const session = await ensureSession();
+  if (!session?.user) {
+    setSharedSettingsHint("Sign in first.");
+    return;
+  }
+  const currentPassword = String(settingsModalState.currentPassword?.value || "");
+  const password = String(settingsModalState.password?.value || "");
+  const confirm = String(settingsModalState.confirm?.value || "");
+  if (!isValidPassword(currentPassword)) {
+    setSharedSettingsHint("Enter your old password first.");
+    return;
+  }
+  if (!isValidPassword(password)) {
+    setSharedSettingsHint("Provide a password with 6-128 characters.");
+    return;
+  }
+  if (password !== confirm) {
+    setSharedSettingsHint("Passwords do not match.");
+    return;
+  }
+  try {
+    const updated = await apiRequest("/auth/update", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: { currentPassword, password }
+    });
+    applySharedSessionUpdate(session, updated?.user || updated);
+    if (settingsModalState.currentPassword) settingsModalState.currentPassword.value = "";
+    if (settingsModalState.password) settingsModalState.password.value = "";
+    if (settingsModalState.confirm) settingsModalState.confirm.value = "";
+    setSharedSettingsHint("Password updated.");
+  } catch (error) {
+    setSharedSettingsHint(`Update failed: ${error.message}`);
+  }
+}
+
+function applySharedSessionUpdate(session, user, metadataPatch = {}) {
+  const nextUser = user?.id
+    ? user
+    : {
+        ...session.user,
+        user_metadata: {
+          ...(session.user.user_metadata || {}),
+          ...metadataPatch
+        }
+      };
+  const nextSession = {
+    ...session,
+    user: {
+      ...session.user,
+      ...nextUser,
+      user_metadata: {
+        ...(session.user.user_metadata || {}),
+        ...(nextUser.user_metadata || {}),
+        ...metadataPatch
+      }
+    }
+  };
+  settingsModalState.session = nextSession;
+  setStoredSession(nextSession);
+  renderSharedAccount(sharedHeaderRefs.avatar, sharedHeaderRefs.label, nextSession);
+}
+
+function normalizeUsername(value) {
+  const trimmed = sanitizeText(value, 24).toLowerCase();
+  return /^[a-z0-9._-]{3,24}$/.test(trimmed) ? trimmed : "";
+}
+
+function normalizeEmail(value, allowBlank = false) {
+  const trimmed = sanitizeText(value, 80).toLowerCase();
+  if (!trimmed) return allowBlank ? "" : null;
+  return /.+@.+\..+/.test(trimmed) ? trimmed : null;
+}
+
+function displayEmail(value) {
+  const email = normalizeEmail(value || "", true);
+  if (!email || email.endsWith("@cinerune.user")) return "";
+  return email;
+}
+
+function isValidPassword(value) {
+  return typeof value === "string" && value.length >= 6 && value.length <= 128;
+}
+
+function sanitizeText(value, maxLen) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return trimmed.slice(0, maxLen);
+}
+
+function cssEscape(value) {
+  return String(value || "").replaceAll('"', "\\\"");
+}
+
+function ensureAccountMenuIcons(menu) {
+  if (!menu) return;
+  const iconMap = {
+    settings: "<svg viewBox=\"0 0 24 24\"><path d=\"M4 6h16\"/><circle cx=\"9\" cy=\"6\" r=\"2\"/><path d=\"M4 12h16\"/><circle cx=\"15\" cy=\"12\" r=\"2\"/><path d=\"M4 18h16\"/><circle cx=\"8\" cy=\"18\" r=\"2\"/></svg>",
+    inbox: "<svg viewBox=\"0 0 24 24\"><path d=\"M4 6h16v12H4z\"/><path d=\"M4 7l8 6 8-6\"/></svg>",
+    bookmarks: "<svg viewBox=\"0 0 24 24\"><path d=\"M6 4h12v16l-6-4-6 4z\"/></svg>",
+    "continue watching": "<svg viewBox=\"0 0 24 24\"><path d=\"M8 5l11 7-11 7z\"/></svg>",
+    "sign out": "<svg viewBox=\"0 0 24 24\"><path d=\"M10 5v14\"/><path d=\"M16 12H4\"/><path d=\"M16 12l-4-4\"/><path d=\"M16 12l-4 4\"/></svg>"
+  };
+
+  [...menu.querySelectorAll(".account-menu-item")].forEach((item) => {
+    if (item.querySelector(".menu-icon")) return;
+    const label = String(item.textContent || "").trim().toLowerCase();
+    const icon = iconMap[label] || null;
+    if (!icon) return;
+    const span = document.createElement("span");
+    span.className = "menu-icon";
+    span.setAttribute("aria-hidden", "true");
+    span.innerHTML = icon;
+    item.insertBefore(span, item.firstChild);
+  });
+}
+
+function ensureHeaderActionsGroup() {
+  const header = document.querySelector(".home-topbar, .watch-topbar");
+  if (!header) return null;
+  const existing = header.querySelector(".header-actions");
+  if (existing) return existing;
+  const wrap = document.createElement("div");
+  wrap.className = "header-actions";
+  const notificationsWrap = document.getElementById("notificationsWrap");
+  const accountWrap = document.getElementById("accountMenuWrap");
+  header.appendChild(wrap);
+  if (notificationsWrap) wrap.appendChild(notificationsWrap);
+  if (accountWrap) wrap.appendChild(accountWrap);
+  return wrap;
+}
+
+function ensureBookmarksLink(anchor) {
+  if (!anchor || anchor.querySelector(".bookmark-pill")) return anchor?.querySelector(".bookmark-pill") || null;
+  const link = document.createElement("a");
+  link.className = "icon-pill bookmark-pill";
+  link.href = "./lists.html";
+  link.setAttribute("aria-label", "Bookmarks");
+  link.setAttribute("hidden", "");
+  link.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 4h12v16l-6-4-6 4z\"/></svg>";
+  if (anchor.classList.contains("header-actions")) {
+    anchor.insertBefore(link, anchor.firstChild);
+  } else {
+    anchor.parentElement?.insertBefore(link, anchor);
+  }
+  return link;
+}
+
+function updateBookmarksLink(link, session) {
+  if (!link) return;
+  if (session?.user) {
+    link.removeAttribute("hidden");
+  } else {
+    link.setAttribute("hidden", "");
+  }
 }
 
 function renderSharedAccount(avatarEl, labelEl, session) {
