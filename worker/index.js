@@ -9,6 +9,22 @@ export default {
 
     if (!url.pathname.startsWith("/api/")) {
       if (env.ASSETS?.fetch) {
+        const cleanPath = url.pathname.replace(/\/+$/, "") || "/";
+        const cleanRoutes = {
+          "/": "/index.html",
+          "/index": "/index.html",
+          "/browse": "/browse.html",
+          "/top-rated": "/top-rated.html",
+          "/search": "/search.html",
+          "/lists": "/lists.html",
+          "/inbox": "/inbox.html",
+          "/watch": "/watch.html"
+        };
+        const mapped = cleanRoutes[cleanPath];
+        if (mapped) {
+          const mappedUrl = new URL(mapped, url.origin);
+          return env.ASSETS.fetch(new Request(mappedUrl.toString(), request));
+        }
         const assetResponse = await env.ASSETS.fetch(request);
         if (assetResponse.status !== 404) return assetResponse;
 

@@ -1564,14 +1564,14 @@ body {
   padding: calc(var(--notice-gap) + 1rem) 1.4rem 1.05rem;
   width: 100%;
   max-width: none;
-  color: rgba(248, 225, 205, 0.95);
+  color: #e8f1fb;
   font-size: 1rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-align: center;
   line-height: 1.5;
   border-radius: 0;
-  border-top: 1px solid rgba(138, 170, 196, 0.22);
+  border-top: 0;
   background: linear-gradient(
     180deg,
     rgba(0, 0, 0, 0) 0,
