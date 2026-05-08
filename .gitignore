@@ -33,3 +33,5 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 !.vscode/extensions.json
+
+.dev.vars*
