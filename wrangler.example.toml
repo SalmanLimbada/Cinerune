@@ -1,0 +1,16 @@
+name = "cinerune"
+main = "worker/index.js"
+compatibility_date = "2026-04-29"
+
+[vars]
+# Copy this file to wrangler.toml for local/deploy config.
+# Add private values like AUTH_RATE_LIMIT_BYPASS_IPS in Cloudflare dashboard
+# environment variables/secrets, not in tracked files.
+
+[assets]
+directory = "."
+binding = "ASSETS"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "replace-with-your-kv-namespace-id"

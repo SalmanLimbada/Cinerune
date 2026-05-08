@@ -1,9 +1,10 @@
 import { ensureSession } from "./auth-client.js";
-import { initTmdb, fetchItemDetailsById } from "./catalog.js?v=20260502-browse2";
+import { initTmdb, fetchItemDetailsById } from "./catalog.js?v=20260508-toggle1";
 
 const progressBaseKey = "cinerune:progress";
 const bookmarksBaseKey = "cinerune:bookmarks";
 const notificationReadBaseKey = "cinerune:notification-read";
+const NEW_EPISODE_WINDOW_DAYS = 14;
 
 let catalogReady = false;
 
@@ -15,6 +16,7 @@ export async function initHeaderNotifications() {
   const list = document.getElementById("notificationsList");
   const markAll = document.getElementById("notificationsMarkAll");
   if (!wrap || !button || !badge || !menu || !list) return;
+  if (wrap.dataset.headerNotificationsReady === "1") return;
 
   setupCatalog();
   let session = null;
@@ -27,6 +29,7 @@ export async function initHeaderNotifications() {
   const signedIn = Boolean(session?.user);
   wrap.toggleAttribute("hidden", !signedIn);
   if (!signedIn) return;
+  wrap.dataset.headerNotificationsReady = "1";
 
   const state = await loadNotificationState(session);
   renderNotifications(list, state, { compact: true });
@@ -131,7 +134,7 @@ async function buildEpisodeNotification(entry, progress) {
 
   let item = null;
   try {
-    item = await fetchItemDetailsById(id, "tv");
+    item = await fetchItemDetailsById(id, "tv", { forceEpisodeRefresh: true });
   } catch {
     return null;
   }
@@ -139,7 +142,7 @@ async function buildEpisodeNotification(entry, progress) {
   const latestSeason = Number(item?.latestEpisodeSeason || 0);
   const latestEpisode = Number(item?.latestEpisodeNumber || 0);
   const latestAirDate = String(item?.latestEpisodeAirDate || "").trim();
-  if (!latestSeason || !latestEpisode || !latestAirDate || !isReleasedDate(latestAirDate)) return null;
+  if (!latestSeason || !latestEpisode || !latestAirDate || !isRecentReleasedDate(latestAirDate)) return null;
 
   const watched = getLatestWatchedEpisode(progress, id);
   if (!isEpisodeAfter(latestSeason, latestEpisode, watched.season, watched.episode)) return null;
@@ -295,6 +298,12 @@ function isReleasedDate(value) {
   if (!value) return false;
   const time = Date.parse(value);
   return Number.isFinite(time) && time <= Date.now() + 24 * 60 * 60 * 1000;
+}
+
+function isRecentReleasedDate(value) {
+  if (!isReleasedDate(value)) return false;
+  const time = Date.parse(value);
+  return Date.now() - time <= NEW_EPISODE_WINDOW_DAYS * 86400000;
 }
 
 function formatShortDate(value) {

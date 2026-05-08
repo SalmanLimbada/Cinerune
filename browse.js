@@ -4,12 +4,14 @@ import {
   fetchCountryOptions,
   fetchTitlesByGenre,
   fetchTitlesByCountry
-} from "./catalog.js?v=20260502-browse2";
-import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
-import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
+} from "./catalog.js?v=20260508-toggle1";
+import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = { valueMax: 12, nameMax: 40 };
+const GRID_PAGE_SIZE = 24;
+const API_PAGE_SIZE = 20;
 const mode = query.get("mode") === "country" ? "country" : "genre";
 let mediaType = query.get("type") === "tv" ? "tv" : "movie";
 let selectedValue = sanitizeText(query.get("value"), INPUT_LIMITS.valueMax);
@@ -70,7 +72,7 @@ async function boot() {
     syncSelectedGenreName();
   }
   el.browseTitle.textContent = `${mode === "country" ? "Country" : "Genre"}: ${selectedName || selectedValue}`;
-  updateGenreToggleVisibility();
+  updateTypeToggleVisibility();
   bindTypeToggle();
   updateTypeToggle();
   el.browseOptionsSection?.setAttribute("hidden", "");
@@ -200,7 +202,7 @@ async function setMediaType(nextType) {
     }
   }
   updateTypeToggle();
-  updateGenreToggleVisibility();
+  updateTypeToggleVisibility();
   updateBrowseUrl();
   await loadBrowseData();
 }
@@ -366,12 +368,8 @@ function mapGenreId(targetType) {
   return mapped;
 }
 
-function updateGenreToggleVisibility() {
+function updateTypeToggleVisibility() {
   if (!el.browseTypeToggle) return;
-  if (mode !== "genre") {
-    el.browseTypeToggle.setAttribute("hidden", "");
-    return;
-  }
   if (selectedValue || selectedName) {
     el.browseTypeToggle.removeAttribute("hidden");
     return;
@@ -391,13 +389,52 @@ function syncSelectedGenreName() {
 }
 
 async function loadBrowseData() {
-  const data = mode === "country"
-    ? await fetchTitlesByCountry(selectedValue, page)
-    : await fetchTitlesByGenre(Number(selectedValue), page);
+  const source = getSourcePageWindow(page);
+  const first = await fetchBrowseSourcePage(source.firstPage);
+  const totalSourcePages = Math.max(1, Number(first.totalPages || 1));
+  const responses = [first];
 
-  state.data = data;
+  if (source.firstPage + 1 <= totalSourcePages) {
+    responses.push(await fetchBrowseSourcePage(source.firstPage + 1));
+  }
+
+  const movies = dedupeMediaItems(responses.flatMap((entry) => entry.movies || []))
+    .slice(source.offset, source.offset + GRID_PAGE_SIZE);
+  const tv = dedupeMediaItems(responses.flatMap((entry) => entry.tv || []))
+    .slice(source.offset, source.offset + GRID_PAGE_SIZE);
+
+  state.data = {
+    movies,
+    tv,
+    page,
+    totalPages: Math.max(1, Math.ceil((totalSourcePages * API_PAGE_SIZE) / GRID_PAGE_SIZE))
+  };
   renderBrowseResults();
-  renderBrowsePagination(data.totalPages || 1);
+  renderBrowsePagination(state.data.totalPages || 1);
+}
+
+function getSourcePageWindow(pageNumber) {
+  const start = (Math.max(1, Number(pageNumber || 1)) - 1) * GRID_PAGE_SIZE;
+  return {
+    firstPage: Math.floor(start / API_PAGE_SIZE) + 1,
+    offset: start % API_PAGE_SIZE
+  };
+}
+
+function fetchBrowseSourcePage(sourcePage) {
+  return mode === "country"
+    ? fetchTitlesByCountry(selectedValue, sourcePage)
+    : fetchTitlesByGenre(Number(selectedValue), sourcePage);
+}
+
+function dedupeMediaItems(items) {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    const key = `${item.mediaType === "tv" ? "tv" : "movie"}:${Number(item.id || 0)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function buildPagerPages(current, total) {
@@ -439,7 +476,7 @@ function renderPosterCards(container, items) {
   container.innerHTML = "";
   const fragment = document.createDocumentFragment();
 
-  items.slice(0, 24).forEach((item) => {
+  items.slice(0, GRID_PAGE_SIZE).forEach((item) => {
     const node = el.posterCardTemplate.content.firstElementChild.cloneNode(true);
     const link = node.querySelector(".poster-btn");
     const image = node.querySelector(".poster-img");
@@ -464,6 +501,7 @@ function renderPosterCards(container, items) {
   });
 
   container.appendChild(fragment);
+  balancePosterGrid(container);
   initDragScroll();
 }
 
@@ -496,13 +534,17 @@ function normalizeCountryFlagCode(code) {
 
 function setPosterImage(image, item) {
   const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = "eager";
+  image.loading = "lazy";
   image.decoding = "async";
+  image.onload = () => image.classList.add("is-loaded");
   image.onerror = () => {
     image.onerror = null;
+    image.onload = null;
+    image.classList.add("is-loaded");
     image.src = fallback;
   };
   image.src = item?.poster || fallback;
+  if (!item?.poster) image.classList.add("is-loaded");
 }
 
 function buildPosterPlaceholder(title) {

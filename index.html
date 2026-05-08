@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link rel="icon" href="./favicon.svg?v=20260430" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="styles.css?v=20260502-ui1" />
+    <link rel="stylesheet" href="styles.css?v=20260508-toggle1" />
   </head>
   <body class="home-body is-home">
     <div class="home-atmosphere" aria-hidden="true"></div>
@@ -122,30 +122,68 @@
               <input id="authPassword" type="password" placeholder="your password" maxlength="128" />
             </label>
             <div class="account-actions">
+              <button id="forgotPasswordBtn" class="mini-action-btn" type="button">Forgot password?</button>
+            </div>
+            <div class="account-actions">
               <button id="signInBtn" class="pill-btn" type="button">Sign In</button>
             </div>
           </div>
 
           <div id="authSignupView" class="account-grid" hidden>
             <h2>Create Account</h2>
-            <label>
-              <span>Username</span>
-              <input id="signupUsername" type="text" placeholder="pick a username" maxlength="24" />
-            </label>
-            <label>
-              <span>Email <em>optional</em></span>
-              <input id="signupEmail" type="email" placeholder="you@example.com" maxlength="80" autocomplete="email" />
-            </label>
-            <label>
-              <span>Password</span>
-              <input id="signupPassword" type="password" placeholder="create a password" maxlength="128" />
-            </label>
-            <label>
-              <span>Confirm Password</span>
-              <input id="signupConfirm" type="password" placeholder="re-enter your password" maxlength="128" />
-            </label>
+            <div class="signup-field-group">
+              <label>
+                <span>Username</span>
+                <input id="signupUsername" type="text" placeholder="pick a username" maxlength="24" />
+              </label>
+            </div>
+            <div class="signup-field-group">
+              <label>
+                <span>Email <em>optional</em></span>
+                <input id="signupEmail" type="email" placeholder="you@example.com" maxlength="80" autocomplete="email" />
+              </label>
+              <label>
+                <span>Confirm Email <em>optional</em></span>
+                <input id="signupEmailConfirm" type="email" placeholder="re-enter your email" maxlength="80" />
+              </label>
+            </div>
+            <div class="signup-field-group">
+              <label>
+                <span>Password</span>
+                <input id="signupPassword" type="password" placeholder="create a password" maxlength="128" />
+              </label>
+              <label>
+                <span>Confirm Password</span>
+                <input id="signupConfirm" type="password" placeholder="re-enter your password" maxlength="128" />
+              </label>
+            </div>
             <div class="account-actions">
               <button id="signUpBtn" class="pill-btn" type="button">Create Account</button>
+            </div>
+          </div>
+
+          <div id="authAddEmailView" class="account-grid" hidden>
+            <h2>Add Email to Account</h2>
+            <p class="tiny muted">Enter your current password and email to attach a reset address.</p>
+            <label>
+              <span>Username</span>
+              <input id="addEmailUsername" type="text" placeholder="your username" maxlength="24" disabled />
+            </label>
+            <label>
+              <span>Current Password</span>
+              <input id="addEmailPassword" type="password" placeholder="current password" maxlength="128" autocomplete="current-password" />
+            </label>
+            <label>
+              <span>Email</span>
+              <input id="addEmailInput" type="email" placeholder="your@email.com" maxlength="80" autocomplete="email" />
+            </label>
+            <label>
+              <span>Confirm Email</span>
+              <input id="addEmailConfirm" type="email" placeholder="re-enter your email" maxlength="80" />
+            </label>
+            <div class="account-actions">
+              <button id="addEmailBtn" class="pill-btn" type="button">Attach Email</button>
+              <button id="cancelAddEmailBtn" class="mini-action-btn" type="button">Back to Sign In</button>
             </div>
           </div>
 
@@ -176,8 +214,16 @@
             </button>
             <div class="settings-section" data-settings-panel="username" hidden>
               <label>
+                <span>Current Username</span>
+                <input id="settingsCurrentUsernameDisplay" type="text" readonly />
+              </label>
+              <label>
                 <span>New Username</span>
                 <input id="settingsUsername" type="text" placeholder="new username" maxlength="24" autocomplete="username" />
+              </label>
+              <label>
+                <span>Confirm New Username</span>
+                <input id="settingsUsernameConfirm" type="text" placeholder="re-enter new username" maxlength="24" autocomplete="username" />
               </label>
               <div class="account-actions">
                 <button id="saveUsernameBtn" class="pill-btn" type="button">Save Username</button>
@@ -193,8 +239,16 @@
             </button>
             <div class="settings-section" data-settings-panel="email" hidden>
               <label>
-                <span>Email Address</span>
+                <span>Current Email</span>
+                <input id="settingsCurrentEmailDisplay" type="email" readonly />
+              </label>
+              <label>
+                <span>New Email Address</span>
                 <input id="settingsEmail" type="email" placeholder="you@example.com" maxlength="80" autocomplete="email" />
+              </label>
+              <label>
+                <span>Confirm New Email</span>
+                <input id="settingsEmailConfirm" type="email" placeholder="re-enter your email" maxlength="80" autocomplete="email" />
               </label>
               <div class="account-actions">
                 <button id="saveEmailBtn" class="pill-btn" type="button">Save Email</button>
@@ -238,6 +292,23 @@
                 <h3>Change Avatar</h3>
               </div>
               <div id="signedInAvatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
+            </div>
+
+            <button class="settings-action-toggle danger" type="button" data-settings-toggle="delete" aria-expanded="false">
+              <span>
+                <strong>Delete Account</strong>
+                <small>Permanently remove your account and saved progress.</small>
+              </span>
+              <span class="settings-action-icon" aria-hidden="true">+</span>
+            </button>
+            <div class="settings-section danger-zone" data-settings-panel="delete" hidden>
+              <label>
+                <span>Type DELETE to confirm</span>
+                <input id="settingsDeleteConfirm" type="text" placeholder="DELETE" maxlength="12" autocomplete="off" />
+              </label>
+              <div class="account-actions">
+                <button id="deleteAccountBtn" class="pill-btn danger" type="button">Delete Account</button>
+              </div>
             </div>
           </div>
         </div>
@@ -331,6 +402,6 @@
         document.head.appendChild(script);
       })();
     </script>
-    <script type="module" src="app.js?v=20260502-ui1"></script>
+    <script type="module" src="app.js?v=20260508-toggle1"></script>
   </body>
 </html>

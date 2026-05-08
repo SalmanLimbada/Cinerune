@@ -26,10 +26,12 @@ export function getStoredSession() {
 export function setStoredSession(session) {
   if (!session) return;
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  window.dispatchEvent(new CustomEvent("cinerune:session-updated", { detail: session }));
 }
 
 export function clearStoredSession() {
   localStorage.removeItem(SESSION_KEY);
+  window.dispatchEvent(new CustomEvent("cinerune:session-updated", { detail: null }));
 }
 
 function isExpiring(session) {

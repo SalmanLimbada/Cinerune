@@ -1,7 +1,8 @@
-import { apiRequest, authHeaders, ensureSession, setStoredSession, clearStoredSession } from "./auth-client.js";
-import { openSettingsModal } from "./shared-ui.js?v=20260502-notifications1";
-import * as catalogApi from "./catalog.js?v=20260501-fix1";
-import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
+import { apiRequest, authHeaders, ensureSession, getStoredSession, setStoredSession, clearStoredSession } from "./auth-client.js";
+import { openSettingsModal } from "./shared-ui.js?v=20260508-toggle1";
+import { showToast } from "./ui-toast.js";
+import * as catalogApi from "./catalog.js?v=20260508-toggle1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
 
 const initTmdb = catalogApi.initTmdb;
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
@@ -20,6 +21,7 @@ const progressBaseKey = "cinerune:progress";
 const bookmarksBaseKey = "cinerune:bookmarks";
 const notificationReadBaseKey = "cinerune:notification-read";
 const homeCacheKey = "cinerune:home-cache";
+const NEW_EPISODE_WINDOW_DAYS = 14;
 const INPUT_LIMITS = {
   identifierMax: 80,
   usernameMax: 24,
@@ -28,6 +30,7 @@ const INPUT_LIMITS = {
   searchMax: 80
 };
 const avatarOptions = [
+  { id: "none", label: "No Avatar" },
   { id: "luffy", label: "Monkey D. Luffy", src: "https://avatarfiles.alphacoders.com/141/141955.png" },
   { id: "naruto", label: "Naruto Uzumaki", src: "https://avatarfiles.alphacoders.com/106/106708.jpg" },
   { id: "goku", label: "Goku", src: "https://avatarfiles.alphacoders.com/263/263487.png" },
@@ -55,21 +58,36 @@ const el = {
   signupTabBtn: document.getElementById("signupTabBtn"),
   authLoginView: document.getElementById("authLoginView"),
   authSignupView: document.getElementById("authSignupView"),
+  authAddEmailView: document.getElementById("authAddEmailView"),
   signedOutView: document.getElementById("signedOutView"),
   signedInView: document.getElementById("signedInView"),
   signedInHint: document.getElementById("signedInHint"),
+  settingsCurrentUsernameDisplay: document.getElementById("settingsCurrentUsernameDisplay"),
   settingsUsername: document.getElementById("settingsUsername"),
+  settingsUsernameConfirm: document.getElementById("settingsUsernameConfirm"),
+  settingsCurrentEmailDisplay: document.getElementById("settingsCurrentEmailDisplay"),
   settingsEmail: document.getElementById("settingsEmail"),
+  settingsEmailConfirm: document.getElementById("settingsEmailConfirm"),
   settingsCurrentPassword: document.getElementById("settingsCurrentPassword"),
   settingsPassword: document.getElementById("settingsPassword"),
   settingsPasswordConfirm: document.getElementById("settingsPasswordConfirm"),
+  settingsDeleteConfirm: document.getElementById("settingsDeleteConfirm"),
   saveUsernameBtn: document.getElementById("saveUsernameBtn"),
   saveEmailBtn: document.getElementById("saveEmailBtn"),
   savePasswordBtn: document.getElementById("savePasswordBtn"),
+  deleteAccountBtn: document.getElementById("deleteAccountBtn"),
   authIdentifier: document.getElementById("authIdentifier"),
   authPassword: document.getElementById("authPassword"),
+  forgotPasswordBtn: document.getElementById("forgotPasswordBtn"),
+  addEmailUsername: document.getElementById("addEmailUsername"),
+  addEmailPassword: document.getElementById("addEmailPassword"),
+  addEmailInput: document.getElementById("addEmailInput"),
+  addEmailConfirm: document.getElementById("addEmailConfirm"),
+  addEmailBtn: document.getElementById("addEmailBtn"),
+  cancelAddEmailBtn: document.getElementById("cancelAddEmailBtn"),
   signupUsername: document.getElementById("signupUsername"),
   signupEmail: document.getElementById("signupEmail"),
+  signupEmailConfirm: document.getElementById("signupEmailConfirm"),
   signupPassword: document.getElementById("signupPassword"),
   signupConfirm: document.getElementById("signupConfirm"),
   signInBtn: document.getElementById("signInBtn"),
@@ -138,7 +156,8 @@ const state = {
   readNotificationIds: new Set(),
   autoSyncTimer: null,
   lastSyncAt: 0,
-  heroRotationTimer: null
+  heroRotationTimer: null,
+  passwordRecoveryMode: false
 };
 
 function getBookmarksKey(session) {
@@ -156,11 +175,18 @@ function getNotificationReadKey(session) {
   return userId ? `${notificationReadBaseKey}:user:${userId}` : `${notificationReadBaseKey}:guest`;
 }
 
-let selectedAvatarId = readJson("cinerune:avatar-choice", "luffy");
+let selectedAvatarId = readJson("cinerune:avatar-choice", "none");
 let authModalMode = "login";
+let suppressLocalSessionUpdate = false;
 const startupQuery = new URLSearchParams(window.location.search);
 const startupAuthMode = startupQuery.get("auth") || startupQuery.get("modal");
 const startupMenu = startupQuery.get("menu");
+const startupHash = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+const startupHashType = startupHash.get("type") || "";
+const startupAuthCallback = startupHash.has("access_token");
+const startupRecoveryMode = startupHashType === "recovery";
+const startupEmailChangeMode = startupHashType === "email_change";
+const startupConfirmationMode = startupAuthCallback && !startupRecoveryMode && !startupEmailChangeMode;
 
 boot();
 
@@ -175,6 +201,9 @@ async function boot() {
   });
 
   await initAuth();
+  if (startupAuthCallback) {
+    await hydrateSessionFromHash();
+  }
   await refreshHome();
   await hydrateContinueRow();
 
@@ -182,6 +211,16 @@ async function boot() {
     openSettingsModal();
   } else if (startupAuthMode === "login") {
     openAuthModal(false);
+  }
+
+  if (startupRecoveryMode && state.session?.user) {
+    openSettingsModal("password");
+  } else if (startupEmailChangeMode && state.session?.user) {
+    openSettingsModal("email");
+    setAuthHint("Email confirmed.");
+  } else if (startupConfirmationMode && state.session?.user) {
+    openAuthModal("settings");
+    setAuthHint("Email confirmed. You are signed in; you can close this tab.");
   }
 
   if (startupMenu === "genre" || startupMenu === "country") {
@@ -233,12 +272,16 @@ function bindEvents() {
   });
 
   if (el.signInBtn) el.signInBtn.addEventListener("click", signIn);
+  if (el.forgotPasswordBtn) el.forgotPasswordBtn.addEventListener("click", requestPasswordReset);
   if (el.signUpBtn) el.signUpBtn.addEventListener("click", signUp);
+  if (el.addEmailBtn) el.addEmailBtn.addEventListener("click", addEmail);
+  if (el.cancelAddEmailBtn) el.cancelAddEmailBtn.addEventListener("click", () => openAuthModal("login"));
   if (el.signOutBtn) el.signOutBtn.addEventListener("click", signOut);
   if (el.signOutMenuBtn) el.signOutMenuBtn.addEventListener("click", signOut);
   if (el.saveUsernameBtn) el.saveUsernameBtn.addEventListener("click", saveUsername);
   if (el.saveEmailBtn) el.saveEmailBtn.addEventListener("click", saveEmail);
   if (el.savePasswordBtn) el.savePasswordBtn.addEventListener("click", savePassword);
+  if (el.deleteAccountBtn) el.deleteAccountBtn.addEventListener("click", deleteAccount);
   if (el.loginTabBtn) el.loginTabBtn.addEventListener("click", () => openAuthModal("login"));
   if (el.signupTabBtn) el.signupTabBtn.addEventListener("click", () => openAuthModal("signup"));
 
@@ -248,6 +291,7 @@ function bindEvents() {
       openSettingsModal();
     });
   }
+  ensureReportMenuItem(el.accountMenu);
 
   if (el.authIdentifier) {
     el.authIdentifier.addEventListener("keydown", onAuthEnter);
@@ -255,10 +299,13 @@ function bindEvents() {
   if (el.authPassword) {
     el.authPassword.addEventListener("keydown", onAuthEnter);
   }
-  [el.signupUsername, el.signupEmail, el.signupPassword, el.signupConfirm].forEach((input) => {
+  [el.signupUsername, el.signupEmail, el.signupEmailConfirm, el.signupPassword, el.signupConfirm].forEach((input) => {
     if (input) input.addEventListener("keydown", onAuthEnter);
   });
-  [el.settingsUsername, el.settingsEmail, el.settingsCurrentPassword, el.settingsPassword, el.settingsPasswordConfirm].forEach((input) => {
+  [el.addEmailPassword, el.addEmailInput, el.addEmailConfirm].forEach((input) => {
+    if (input) input.addEventListener("keydown", onAuthEnter);
+  });
+  [el.settingsUsername, el.settingsUsernameConfirm, el.settingsEmail, el.settingsEmailConfirm, el.settingsCurrentPassword, el.settingsPassword, el.settingsPasswordConfirm, el.settingsDeleteConfirm].forEach((input) => {
     if (input) input.addEventListener("keydown", onAuthEnter);
   });
 
@@ -339,6 +386,11 @@ function bindEvents() {
   });
 
   window.addEventListener("storage", (event) => {
+    if (event.key === "cinerune:session") {
+      void handleSessionStorageChange();
+      return;
+    }
+
     if (event.key === getProgressKey(state.session) && event.newValue) {
       try {
         state.progress = JSON.parse(event.newValue);
@@ -356,6 +408,34 @@ function bindEvents() {
       refreshPersonalizedCollections();
     }
   });
+  window.addEventListener("cinerune:session-updated", () => {
+    if (suppressLocalSessionUpdate) return;
+    void handleSessionStorageChange({ quiet: true });
+  });
+  window.addEventListener("pageshow", () => {
+    const latestSession = getStoredSession();
+    const latestAvatar = latestSession?.user?.user_metadata?.avatarId;
+    if (latestAvatar && latestAvatar !== state.session?.user?.user_metadata?.avatarId) {
+      void handleSessionStorageChange({ quiet: true });
+    }
+  });
+}
+
+async function handleSessionStorageChange(options = {}) {
+  const session = await ensureSession();
+  state.session = session;
+  syncProgressState();
+  syncBookmarksState();
+  syncNotificationReadState();
+  renderAuthUI();
+  if (session?.user) {
+    if (!options.quiet) setAuthHint("Signed in.");
+    if (!options.quiet) closeAuthModal();
+    await pullCloudProgress();
+  } else {
+    refreshPersonalizedCollections();
+    hydrateContinueRow();
+  }
 }
 
 function bindRowArrows(grid, prevBtn, nextBtn) {
@@ -370,6 +450,11 @@ function bindRowArrows(grid, prevBtn, nextBtn) {
 }
 
 async function refreshHome() {
+  const cachedHomeData = readJson(homeCacheKey, null);
+  if (cachedHomeData) {
+    await applyHomeData(cachedHomeData, { personalize: false });
+  }
+
   const [homeResult, genresResult, countriesResult] = await Promise.allSettled([
     fetchHomeCatalog(),
     fetchGenreOptions(),
@@ -384,27 +469,36 @@ async function refreshHome() {
     homeData = readJson(homeCacheKey, null);
   }
 
-  if (!homeData) {
+  if (!homeData && !cachedHomeData) {
     renderUnavailableState();
     return;
   }
 
-  state.homeData.hero = homeData.hero || null;
-  state.homeData.recommended = await buildRecommendedRow(homeData);
-  state.homeData.trending = homeData.trending || [];
-  state.homeData.popular = homeData.popular || [];
+  if (homeData) {
+    await applyHomeData(homeData);
+  }
 
   const genreData = genresResult.status === "fulfilled" ? genresResult.value : { movie: [], tv: [] };
   state.genreOptions = dedupeExplorerOptions([...(genreData.movie || []), ...(genreData.tv || [])], "id");
   state.countryOptions = countriesResult.status === "fulfilled" ? (countriesResult.value || []) : [];
 
+  renderMegaMenu();
+  await refreshNotifications();
+  startHeroRotation();
+}
+
+async function applyHomeData(homeData, options = {}) {
+  state.homeData.hero = homeData.hero || null;
+  state.homeData.recommended = options.personalize === false
+    ? (homeData.recommended || []).slice(0, 24)
+    : await buildRecommendedRow(homeData);
+  state.homeData.trending = homeData.trending || [];
+  state.homeData.popular = homeData.popular || [];
+
   renderHero();
   renderRecommended();
   renderTrending();
   renderPopular();
-  renderMegaMenu();
-  await refreshNotifications();
-  startHeroRotation();
 }
 
 function renderUnavailableState() {
@@ -510,7 +604,7 @@ function renderMegaMenu() {
 
 async function hydrateContinueRow() {
   const entries = dedupeContinueEntries(Object.values(state.progress)
-    .filter((entry) => Number(entry.timestamp || 0) > 20 && Number(entry.progress || 0) < 98))
+    .filter((entry) => Number(entry.timestamp || 0) > 8 && Number(entry.progress || 0) < 98))
     .slice(0, 14);
 
   updateContinueWatchingLink(entries[0] || null);
@@ -536,6 +630,7 @@ async function hydrateContinueRow() {
       poster: apiItem?.poster || entry.poster || posterById(entry.id, entry.mediaType) || "",
       year: apiItem?.year || "",
       progressPercent: Math.max(0, Math.min(100, Number(entry.progress || 0))),
+      resumeSeconds: Number(entry.timestamp || 0),
       progressKey: `${entry.mediaType}:${entry.id}:${entry.season || 1}:${entry.episode || 1}`,
       progressMeta: entry.mediaType === "tv"
         ? `S${entry.season || 1} E${entry.episode || 1} • ${formatSeconds(entry.timestamp)}`
@@ -562,7 +657,7 @@ function renderPosterCards(container, items, options = {}) {
   container.innerHTML = "";
   const fragment = document.createDocumentFragment();
 
-  items.forEach((item) => {
+  items.forEach((item, index) => {
     const node = el.posterCardTemplate.content.firstElementChild.cloneNode(true);
     const link = node.querySelector(".poster-btn");
     const image = node.querySelector(".poster-img");
@@ -570,13 +665,13 @@ function renderPosterCards(container, items, options = {}) {
     const sub = node.querySelector(".poster-sub");
     const meta = node.querySelector(".poster-meta");
 
-    setPosterImage(image, item);
+    setPosterImage(image, item, { eager: index < 8 });
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
 
     if (options.showProgressMeta && item.progressMeta) {
       node.classList.add("continue-card");
-      sub.textContent = item.progressMeta;
+      renderContinueMeta(sub, item);
       sub.classList.add("continue-meta");
       const progressTrack = document.createElement("span");
       progressTrack.className = "continue-progress";
@@ -621,6 +716,7 @@ function renderPosterCards(container, items, options = {}) {
   });
 
   container.appendChild(fragment);
+  balancePosterGrid(container);
   initDragScroll();
 }
 
@@ -646,20 +742,26 @@ function removeContinueEntry(progressEntryKey) {
 
 async function buildRecommendedRow(homeData) {
   const historyEntries = collectRecommendationHistory();
+  const excludedKeys = collectRecommendationExcludedKeys();
+  const fallback = (homeData.recommended || [])
+    .filter((item) => !excludedKeys.has(`${item.mediaType}:${Number(item.id || 0)}`))
+    .slice(0, 24);
+
   if (!historyEntries.length) {
-    return (homeData.recommended || []).slice(0, 24);
+    return fallback;
   }
 
   try {
     const personalized = await fetchRecommendedFromHistory(historyEntries, 24);
-    if (personalized.length) {
-      return personalized;
+    const filtered = personalized.filter((item) => !excludedKeys.has(`${item.mediaType}:${Number(item.id || 0)}`));
+    if (filtered.length) {
+      return filtered.slice(0, 24);
     }
   } catch {
     // fall back to non-personalized home data
   }
 
-  return (homeData.recommended || []).slice(0, 24);
+  return fallback;
 }
 
 function collectRecommendationHistory() {
@@ -672,6 +774,23 @@ function collectRecommendationHistory() {
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
   return [...progressEntries, ...bookmarkEntries];
+}
+
+function collectRecommendationExcludedKeys() {
+  const keys = new Set();
+  Object.values(state.progress || {}).forEach((entry) => {
+    const id = Number(entry?.id || 0);
+    if (!id) return;
+    keys.add(`${entry.mediaType === "tv" ? "tv" : "movie"}:${id}`);
+  });
+  Object.values(state.bookmarks || {}).forEach((entry) => {
+    const id = Number(entry?.id || 0);
+    if (!id) return;
+    if (entry?.status === "watching" || entry?.status === "watched") {
+      keys.add(`${entry.mediaType === "tv" ? "tv" : "movie"}:${id}`);
+    }
+  });
+  return keys;
 }
 
 async function refreshPersonalizedCollections() {
@@ -703,7 +822,7 @@ async function buildEpisodeNotification(entry) {
 
   let item = null;
   try {
-    item = await fetchItemDetailsById(id, "tv");
+    item = await fetchItemDetailsById(id, "tv", { forceEpisodeRefresh: true });
   } catch {
     return null;
   }
@@ -711,7 +830,7 @@ async function buildEpisodeNotification(entry) {
   const latestSeason = Number(item?.latestEpisodeSeason || 0);
   const latestEpisode = Number(item?.latestEpisodeNumber || 0);
   const latestAirDate = String(item?.latestEpisodeAirDate || "").trim();
-  if (!latestSeason || !latestEpisode || !latestAirDate || !isReleasedDate(latestAirDate)) {
+  if (!latestSeason || !latestEpisode || !latestAirDate || !isRecentReleasedDate(latestAirDate)) {
     return null;
   }
 
@@ -875,6 +994,8 @@ function toggleSettingsPanel(panelName) {
       if (el.settingsCurrentPassword) el.settingsCurrentPassword.value = "";
       if (el.settingsPassword) el.settingsPassword.value = "";
       if (el.settingsPasswordConfirm) el.settingsPasswordConfirm.value = "";
+    } else if (panelName === "delete") {
+      if (el.settingsDeleteConfirm) el.settingsDeleteConfirm.value = "";
     }
     targetPanel.removeAttribute("hidden");
     targetButton.setAttribute("aria-expanded", "true");
@@ -994,6 +1115,7 @@ function renderAuthUI() {
     el.signedInView.toggleAttribute("hidden", !signedIn);
     el.authLoginView?.toggleAttribute("hidden", !loginMode);
     el.authSignupView?.toggleAttribute("hidden", !signupMode);
+    el.authAddEmailView?.setAttribute("hidden", "");
   }
 
   if (signedIn) {
@@ -1027,11 +1149,25 @@ function renderAuthUI() {
     }
     el.signedInHint.textContent = "You are signed in.";
     if (el.settingsUsername) {
-      el.settingsUsername.value = user.user_metadata?.username || "";
+      el.settingsUsername.value = "";
+    }
+    if (el.settingsUsernameConfirm) {
+      el.settingsUsernameConfirm.value = "";
+    }
+    if (el.settingsCurrentUsernameDisplay) {
+      el.settingsCurrentUsernameDisplay.value = user.user_metadata?.username || "";
     }
     if (el.settingsEmail) {
-      el.settingsEmail.value = publicEmail;
+      el.settingsEmail.value = "";
     }
+    if (el.settingsEmailConfirm) {
+      el.settingsEmailConfirm.value = "";
+    }
+    if (el.settingsCurrentEmailDisplay) {
+      el.settingsCurrentEmailDisplay.value = publicEmail || "No email added";
+    }
+    updatePasswordSettingsLabels();
+    updateEmailSettingsLabels();
   } else {
     const avatarId = normalizeAvatarId(selectedAvatarId);
     renderActiveAvatar(avatarId);
@@ -1040,10 +1176,17 @@ function renderAuthUI() {
     el.homeListsLink?.setAttribute("hidden", "");
     if (el.toggleAuth) el.toggleAuth.title = "Sign in";
     if (el.settingsUsername) el.settingsUsername.value = "";
+    if (el.settingsUsernameConfirm) el.settingsUsernameConfirm.value = "";
+    if (el.settingsCurrentUsernameDisplay) el.settingsCurrentUsernameDisplay.value = "";
     if (el.settingsEmail) el.settingsEmail.value = "";
+    if (el.settingsEmailConfirm) el.settingsEmailConfirm.value = "";
+    if (el.settingsCurrentEmailDisplay) el.settingsCurrentEmailDisplay.value = "";
     if (el.settingsCurrentPassword) el.settingsCurrentPassword.value = "";
     if (el.settingsPassword) el.settingsPassword.value = "";
     if (el.settingsPasswordConfirm) el.settingsPasswordConfirm.value = "";
+    if (el.settingsDeleteConfirm) el.settingsDeleteConfirm.value = "";
+    updatePasswordSettingsLabels();
+    updateEmailSettingsLabels();
     setAuthHint("");
   }
 
@@ -1053,6 +1196,54 @@ function renderAuthUI() {
   }
 
   renderNotifications();
+}
+
+function updatePasswordSettingsLabels() {
+  document.querySelectorAll('[data-settings-toggle="password"] small').forEach((node) => {
+    node.textContent = state.passwordRecoveryMode
+      ? "Enter your new password twice."
+      : "Old password required, new password entered twice.";
+  });
+  const currentPasswordLabel = el.settingsCurrentPassword?.closest("label");
+  currentPasswordLabel?.toggleAttribute("hidden", state.passwordRecoveryMode);
+  if (state.passwordRecoveryMode && el.settingsCurrentPassword) {
+    el.settingsCurrentPassword.value = "";
+  }
+}
+
+function updateEmailSettingsLabels() {
+  const hasPublicEmail = Boolean(displayEmail(state.session?.user?.email || ""));
+  document.querySelectorAll('[data-settings-toggle="email"] strong').forEach((node) => {
+    node.textContent = hasPublicEmail ? "Change Email" : "Add Email";
+  });
+  document.querySelectorAll('[data-settings-toggle="email"] small').forEach((node) => {
+    node.textContent = hasPublicEmail
+      ? "Update the email used for login and password reset."
+      : "Add a login backup and password reset address.";
+  });
+  if (el.saveEmailBtn) {
+    el.saveEmailBtn.textContent = hasPublicEmail ? "Change Email" : "Save Email";
+  }
+}
+
+function getUserFriendlyError(error) {
+  const msg = String(error?.message || error || "").toLowerCase();
+  
+  // Authentication errors
+  if (msg.includes("invalid") || msg.includes("wrong") || msg.includes("incorrect")) return "Username/email or password is incorrect.";
+  if (msg.includes("not found")) return "Account not found.";
+  if (msg.includes("already") && msg.includes("use")) return "This email or username is already in use.";
+  if (msg.includes("already")) return "This already exists.";
+  if (msg.includes("too many")) return "Too many attempts. Try again in a few minutes.";
+  if (msg.includes("rate limit")) return "Too many attempts. Try again in a few minutes.";
+  if (msg.includes("email")) return "Email is invalid or already in use.";
+  if (msg.includes("password")) return "Password doesn't meet requirements or is incorrect.";
+  if (msg.includes("username")) return "Username is invalid or already in use.";
+  if (msg.includes("confirm")) return "Please check your email to confirm.";
+  if (msg.includes("verified")) return "Email not verified yet. Check your inbox.";
+  
+  // Default: don't show raw error, just say something generic
+  return "Could not complete that action. Try again.";
 }
 
 async function signIn() {
@@ -1070,27 +1261,104 @@ async function signIn() {
       body: { identifier, password }
     });
     if (!session?.access_token) {
-      setAuthHint("Sign in failed. Try again.");
+      setAuthHint("Username/email or password is wrong. Try again.");
       return;
     }
+    suppressLocalSessionUpdate = true;
     setStoredSession(session);
+    suppressLocalSessionUpdate = false;
     state.session = session;
     syncProgressState();
     syncBookmarksState();
     syncNotificationReadState();
-    await persistAvatarChoice(selectedAvatarId);
+    selectedAvatarId = normalizeAvatarId(session.user?.user_metadata?.avatarId || "none");
+    closeAuthModal();
     renderAuthUI();
     await pullCloudProgress();
     setAuthHint("Signed in.");
-    closeAuthModal();
   } catch (error) {
-    setAuthHint(`Sign in failed: ${error.message}`);
+    if (error?.status === 400 || error?.status === 401 || error?.status === 403) {
+      setAuthHint("Username/email or password is wrong. Try again.");
+      return;
+    }
+    setAuthHint(getUserFriendlyError(error));
+  }
+}
+
+async function requestPasswordReset() {
+  const identifier = normalizeIdentifier(el.authIdentifier?.value || "");
+  if (!identifier) {
+    setAuthHint("Enter your username or email first.");
+    return;
+  }
+
+  try {
+    const response = await apiRequest("/auth/forgot", {
+      method: "POST",
+      body: { identifier }
+    });
+    
+    if (response.needsEmail) {
+      // Show add email form
+      if (el.addEmailUsername) {
+        el.addEmailUsername.value = response.username || "";
+      }
+      if (el.addEmailInput) {
+        el.addEmailInput.value = "";
+      }
+      if (el.addEmailPassword) {
+        el.addEmailPassword.value = "";
+      }
+      showAuthView("addEmail");
+      setAuthHint("This account needs an email before password reset can work.");
+      return;
+    }
+    
+    setAuthHint("If your account exists, a reset link has been sent to your email.");
+  } catch {
+    setAuthHint("If your account exists, a reset link has been sent to your email.");
+  }
+}
+
+async function addEmail() {
+  const username = normalizeUsername(el.addEmailUsername?.value || "");
+  const password = String(el.addEmailPassword?.value || "");
+  const email = normalizeEmail(el.addEmailInput?.value || "", false);
+  const emailConfirm = normalizeEmail(el.addEmailConfirm?.value || "", false);
+
+  if (!username || !email || !isValidPassword(password)) {
+    setAuthHint("Enter your current password and a valid email.");
+    return;
+  }
+  if (email !== emailConfirm) {
+    setAuthHint("Emails do not match.");
+    return;
+  }
+
+  try {
+    await apiRequest("/auth/add-email", {
+      method: "POST",
+      body: { username, password, email }
+    });
+    setAuthHint("Check your email to confirm the address, then request a reset link.");
+    // Clear the form
+    if (el.addEmailPassword) el.addEmailPassword.value = "";
+    if (el.addEmailInput) el.addEmailInput.value = "";
+    if (el.addEmailConfirm) el.addEmailConfirm.value = "";
+    // Go back to login after a brief delay
+    setTimeout(() => {
+      openAuthModal("login");
+      setAuthHint("");
+    }, 2000);
+  } catch (error) {
+    setAuthHint(getUserFriendlyError(error));
   }
 }
 
 async function signUp() {
   const username = normalizeUsername(el.signupUsername.value);
   const email = normalizeEmail(el.signupEmail?.value || "", true);
+  const emailConfirm = normalizeEmail(el.signupEmailConfirm?.value || "", true);
   const password = String(el.signupPassword.value || "");
   const confirmPassword = String(el.signupConfirm.value || "");
 
@@ -1098,8 +1366,12 @@ async function signUp() {
     setAuthHint("Provide a username and a password (6+ chars).");
     return;
   }
-  if (email === null) {
-    setAuthHint("Enter a valid email address or leave it blank.");
+  if (email === null || emailConfirm === null) {
+    setAuthHint("Enter a valid email address or leave both blank.");
+    return;
+  }
+  if ((email || emailConfirm) && email !== emailConfirm) {
+    setAuthHint("Emails do not match.");
     return;
   }
   if (password !== confirmPassword) {
@@ -1114,12 +1386,38 @@ async function signUp() {
         username,
         email: email || undefined,
         password,
-        avatarId: normalizeAvatarId(selectedAvatarId)
+        avatarId: "none"
       }
     });
-    setAuthHint("Account created. Sign in with your username and password.");
+    let session = null;
+    try {
+      session = await apiRequest("/auth/login", {
+        method: "POST",
+        body: { identifier: username, password }
+      });
+    } catch {
+      session = null;
+    }
+    if (!session?.access_token) {
+      setAuthHint(email
+        ? "Account created. Check your email if confirmation is required, then sign in."
+        : "Account created. Sign in with your username and password.");
+      return;
+    }
+    suppressLocalSessionUpdate = true;
+    setStoredSession(session);
+    suppressLocalSessionUpdate = false;
+    state.session = session;
+    selectedAvatarId = normalizeAvatarId(session.user?.user_metadata?.avatarId || "none");
+    syncProgressState();
+    syncBookmarksState();
+    syncNotificationReadState();
+    closeAuthModal();
+    renderAuthUI();
+    await pullCloudProgress();
+    setAuthHint("Account created.");
   } catch (error) {
-    setAuthHint(`Sign up failed: ${error.message}`);
+    setAuthHint(getUserFriendlyError(error));
   }
 }
 
@@ -1141,10 +1439,28 @@ async function signOut() {
   syncProgressState();
   syncBookmarksState();
   syncNotificationReadState();
+  closeAuthModal();
   renderAuthUI();
   refreshPersonalizedCollections();
   hydrateContinueRow();
-  setAuthHint("Signed out.");
+  window.dispatchEvent(new CustomEvent("cinerune:session-updated", { detail: null }));
+}
+
+function renderContinueMeta(container, item) {
+  container.textContent = "";
+  const main = document.createElement("span");
+  main.className = "continue-meta-main";
+  const extra = document.createElement("span");
+  extra.className = "continue-meta-extra";
+
+  if (item.mediaType === "tv") {
+    main.textContent = `S${item.season || 1} E${item.episode || 1}`;
+    extra.textContent = formatSeconds(item.resumeSeconds || 0);
+  } else {
+    main.textContent = `${Math.round(Number(item.progressPercent || 0))}%`;
+    extra.textContent = formatSeconds(item.resumeSeconds || 0);
+  }
+  container.append(main, extra);
 }
 
 async function saveUsername() {
@@ -1154,8 +1470,13 @@ async function saveUsername() {
   }
 
   const username = normalizeUsername(el.settingsUsername?.value);
+  const usernameConfirm = normalizeUsername(el.settingsUsernameConfirm?.value);
   if (!username) {
     setAuthHint("Provide a username with 3-24 letters, numbers, dots, underscores, or dashes.");
+    return;
+  }
+  if (username !== usernameConfirm) {
+    setAuthHint("Usernames do not match.");
     return;
   }
 
@@ -1174,9 +1495,12 @@ async function saveUsername() {
       }
     });
     applyUpdatedUser(updated?.user || updated, { username });
+    if (el.settingsUsername) el.settingsUsername.value = "";
+    if (el.settingsUsernameConfirm) el.settingsUsernameConfirm.value = "";
+    if (el.settingsCurrentUsernameDisplay) el.settingsCurrentUsernameDisplay.value = username;
     setAuthHint("Username updated.");
   } catch (error) {
-    setAuthHint(`Update failed: ${error.message}`);
+    setAuthHint(getUserFriendlyError(error));
   }
 }
 
@@ -1187,8 +1511,13 @@ async function saveEmail() {
   }
 
   const email = normalizeEmail(el.settingsEmail?.value || "", true);
+  const emailConfirm = normalizeEmail(el.settingsEmailConfirm?.value || "", true);
   if (email === null || !email) {
     setAuthHint("Enter a valid email address.");
+    return;
+  }
+  if (email !== emailConfirm) {
+    setAuthHint("Emails do not match.");
     return;
   }
 
@@ -1207,10 +1536,29 @@ async function saveEmail() {
       }
     });
     applyUpdatedUser(updated?.user || updated, { email });
-    setAuthHint("Email saved. You can sign in with it now.");
+    if (el.settingsEmail) el.settingsEmail.value = "";
+    if (el.settingsEmailConfirm) el.settingsEmailConfirm.value = "";
+    if (!updated?.pendingEmailConfirmation && el.settingsCurrentEmailDisplay) {
+      el.settingsCurrentEmailDisplay.value = email;
+    }
+    setAuthHint(updated?.pendingEmailConfirmation
+      ? "Check your email and confirm the change to finish updating your address."
+      : "Email saved. You can sign in with it now.");
+    await refreshCurrentUser();
   } catch (error) {
-    setAuthHint(`Update failed: ${error.message}`);
+    setAuthHint(getUserFriendlyError(error));
   }
+}
+
+async function refreshCurrentUser() {
+  const session = await ensureSession();
+  if (!session?.access_token) return;
+  const currentUser = await apiRequest("/auth/me", {
+    method: "GET",
+    headers: authHeaders(session)
+  });
+  if (!currentUser?.user && !currentUser?.id) return;
+  applyUpdatedUser(currentUser?.user || currentUser);
 }
 
 async function savePassword() {
@@ -1222,7 +1570,7 @@ async function savePassword() {
   const currentPassword = String(el.settingsCurrentPassword?.value || "");
   const password = String(el.settingsPassword?.value || "");
   const confirm = String(el.settingsPasswordConfirm?.value || "");
-  if (!isValidPassword(currentPassword)) {
+  if (!state.passwordRecoveryMode && !isValidPassword(currentPassword)) {
     setAuthHint("Enter your old password first.");
     return;
   }
@@ -1244,16 +1592,63 @@ async function savePassword() {
     const updated = await apiRequest("/auth/update", {
       method: "POST",
       headers: authHeaders(session),
-      body: { currentPassword, password }
+      body: {
+        currentPassword,
+        password,
+        recovery: state.passwordRecoveryMode === true
+      }
     });
     applyUpdatedUser(updated?.user || updated);
+    state.passwordRecoveryMode = false;
     if (el.settingsCurrentPassword) el.settingsCurrentPassword.value = "";
     if (el.settingsPassword) el.settingsPassword.value = "";
     if (el.settingsPasswordConfirm) el.settingsPasswordConfirm.value = "";
     setAuthHint("Password updated.");
   } catch (error) {
-    setAuthHint(`Update failed: ${error.message}`);
+    setAuthHint(getUserFriendlyError(error));
   }
+}
+
+async function deleteAccount() {
+  if (!state.session?.user) {
+    setAuthHint("Sign in first.");
+    return;
+  }
+  if (String(el.settingsDeleteConfirm?.value || "").trim() !== "DELETE") {
+    setAuthHint("Type DELETE to confirm account deletion.");
+    return;
+  }
+  try {
+    const session = await ensureSession();
+    if (!session) {
+      setAuthHint("Sign in again to delete your account.");
+      return;
+    }
+    await apiRequest("/auth/delete", {
+      method: "POST",
+      headers: authHeaders(session)
+    });
+    clearUserLocalData(session);
+    clearStoredSession();
+    state.session = null;
+    syncProgressState();
+    syncBookmarksState();
+    syncNotificationReadState();
+    renderAuthUI();
+    window.location.href = "./index.html";
+  } catch (error) {
+    setAuthHint(getUserFriendlyError(error));
+  }
+}
+
+function clearUserLocalData(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  if (!userId) return;
+  [
+    `cinerune:progress:user:${userId}`,
+    `cinerune:bookmarks:user:${userId}`,
+    `cinerune:notification-read:user:${userId}`
+  ].forEach((key) => localStorage.removeItem(key));
 }
 
 function applyUpdatedUser(user, metadataPatch = {}) {
@@ -1283,6 +1678,127 @@ function applyUpdatedUser(user, metadataPatch = {}) {
   renderAuthUI();
 }
 
+function ensureReportMenuItem(menu) {
+  if (!menu || menu.querySelector("[data-open-report]")) return;
+  const button = document.createElement("button");
+  button.className = "account-menu-item";
+  button.type = "button";
+  button.dataset.openReport = "true";
+  button.innerHTML = `
+    <span class="menu-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M8 6l-2-2"/><path d="M16 6l2-2"/><path d="M9 9h6"/><path d="M8 13h8"/><path d="M9 17h6"/><rect x="7" y="6" width="10" height="14" rx="5"/><path d="M3 13h4"/><path d="M17 13h4"/></svg>
+    </span>
+    <span>Report</span>
+  `;
+  const signOut = menu.querySelector("#signOutMenuBtn, .destructive");
+  menu.insertBefore(button, signOut || null);
+  button.addEventListener("click", () => {
+    closeAccountMenu();
+    openReportDialog();
+  });
+}
+
+function openReportDialog() {
+  let dialog = document.getElementById("globalReportDialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "globalReportDialog";
+    dialog.className = "report-dialog";
+    dialog.innerHTML = `
+      <form id="globalReportForm" method="dialog">
+        <h3>Send Report</h3>
+        <p class="tiny muted">Report a bug, request a movie, or request a show.</p>
+        <textarea id="globalReportMessage" rows="4" placeholder="Write your report or request"></textarea>
+        <div class="account-actions">
+          <button id="globalReportCancel" class="pill-btn ghost" value="cancel" type="button">Cancel</button>
+          <button class="pill-btn" value="submit" type="submit">Send Report</button>
+        </div>
+      </form>
+    `;
+    document.body.appendChild(dialog);
+    dialog.querySelector("#globalReportCancel")?.addEventListener("click", () => dialog.close("cancel"));
+    dialog.querySelector("#globalReportForm")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = dialog.querySelector("#globalReportMessage");
+      const message = sanitizeText(input?.value || "", 500);
+      if (input && input.value !== message) input.value = message;
+      if (!message) {
+        setAuthHint("Write a report message first.");
+        return;
+      }
+      const report = {
+        page: window.location.pathname,
+        message,
+        createdAt: Date.now(),
+        userId: state.session?.user?.id || ""
+      };
+      saveLocalReport(report);
+      void submitReportToServer(report);
+      dialog.close("submit");
+      setAuthHint("Report saved.");
+    });
+  }
+  const textarea = dialog.querySelector("#globalReportMessage");
+  if (textarea) textarea.value = "";
+  dialog.showModal();
+}
+
+function saveLocalReport(report) {
+  const reports = readJson("cinerune:reports", []);
+  reports.unshift(report);
+  localStorage.setItem("cinerune:reports", JSON.stringify(reports.slice(0, 200)));
+}
+
+async function submitReportToServer(report) {
+  try {
+    const session = await ensureSession();
+    await apiRequest("/report", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: report
+    });
+  } catch {
+    // The local copy above is the fallback if the reports table is not configured.
+  }
+}
+
+async function hydrateSessionFromHash() {
+  const accessToken = startupHash.get("access_token");
+  const refreshToken = startupHash.get("refresh_token");
+  if (!accessToken) return;
+
+  const expiresIn = Number(startupHash.get("expires_in") || 3600);
+  const expiresAt = Number(startupHash.get("expires_at") || Math.floor(Date.now() / 1000) + expiresIn);
+  const tokenType = startupHash.get("token_type") || "bearer";
+  const session = {
+    access_token: accessToken,
+    refresh_token: refreshToken || "",
+    expires_in: expiresIn,
+    expires_at: expiresAt,
+    token_type: tokenType,
+    user: null
+  };
+
+  state.passwordRecoveryMode = startupRecoveryMode;
+  setStoredSession(session);
+  try {
+    const currentUser = await apiRequest("/auth/me", {
+      method: "GET",
+      headers: authHeaders(session)
+    });
+    state.session = {
+      ...session,
+      user: currentUser?.user || currentUser || null
+    };
+    setStoredSession(state.session);
+    renderAuthUI();
+  } catch {
+    state.session = session;
+  }
+
+  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+}
+
 function onAuthEnter(event) {
   if (event.key !== "Enter") return;
   event.preventDefault();
@@ -1292,11 +1808,13 @@ function onAuthEnter(event) {
     const target = event.target;
     if (target === el.settingsPassword || target === el.settingsPasswordConfirm || target === el.settingsCurrentPassword) {
       savePassword();
-    } else if (target === el.settingsEmail) {
+    } else if (target === el.settingsEmail || target === el.settingsEmailConfirm) {
       saveEmail();
     } else {
       saveUsername();
     }
+  } else if (el.authAddEmailView && !el.authAddEmailView.hasAttribute("hidden")) {
+    addEmail();
   } else {
     signIn();
   }
@@ -1330,7 +1848,7 @@ function normalizeEmail(value, allowBlank = false) {
 
 function displayEmail(value) {
   const email = normalizeEmail(value || "", true);
-  if (!email || email.endsWith("@cinerune.user")) return "";
+  if (!email || email.endsWith("@cinerune.user") || email.endsWith("@users.cinerune.app")) return "";
   return email;
 }
 
@@ -1339,7 +1857,7 @@ function isValidPassword(value) {
 }
 
 function normalizeAvatarId(value) {
-  const fallback = avatarOptions[0]?.id || "luffy";
+  const fallback = avatarOptions[0]?.id || "none";
   return avatarOptions.some((option) => option.id === value) ? value : fallback;
 }
 
@@ -1409,8 +1927,12 @@ function avatarImageSrc(avatar) {
 
 async function persistAvatarChoice(avatarId) {
   const normalized = normalizeAvatarId(avatarId);
+  const previous = normalizeAvatarId(state.session?.user?.user_metadata?.avatarId || selectedAvatarId);
   selectedAvatarId = normalized;
   localStorage.setItem("cinerune:avatar-choice", JSON.stringify(normalized));
+  renderAvatarPickers();
+  renderActiveAvatar(normalized);
+  if (state.session?.user) renderAccountButton(normalized, "Account");
 
   if (!state.session?.user) return;
 
@@ -1426,8 +1948,14 @@ async function persistAvatarChoice(avatarId) {
       }
     });
     applyUpdatedUser(updated?.user || updated, { avatarId: normalized });
-  } catch {
-    // ignore avatar sync errors
+    setAuthHint("Avatar updated.");
+  } catch (error) {
+    selectedAvatarId = previous;
+    localStorage.setItem("cinerune:avatar-choice", JSON.stringify(previous));
+    renderAvatarPickers();
+    renderActiveAvatar(previous);
+    renderAccountButton(previous, state.session?.user ? "Account" : "Login");
+    setAuthHint(getUserFriendlyError(error));
   }
 }
 
@@ -1458,12 +1986,32 @@ function openAuthModal(mode = "login") {
   renderAuthUI();
 }
 
+function showAuthView(view) {
+  // Show a specific auth view without updating authModalMode
+  if (view === "login") {
+    el.authLoginView?.removeAttribute("hidden");
+    el.authSignupView?.setAttribute("hidden", "");
+    el.authAddEmailView?.setAttribute("hidden", "");
+  } else if (view === "signup") {
+    el.authLoginView?.setAttribute("hidden", "");
+    el.authSignupView?.removeAttribute("hidden");
+    el.authAddEmailView?.setAttribute("hidden", "");
+  } else if (view === "addEmail") {
+    el.authLoginView?.setAttribute("hidden", "");
+    el.authSignupView?.setAttribute("hidden", "");
+    el.authAddEmailView?.removeAttribute("hidden");
+  }
+}
+
 async function syncProgressToCloud() {
   if (!state.session?.user) return;
   const session = await ensureSession();
   if (!session) return;
 
-  const rows = Object.values(state.progress).slice(-240).map((entry) => ({
+  const rows = dedupeProgressRows(Object.values(state.progress))
+    .filter((entry) => shouldSyncProgressEntry(entry))
+    .slice(-240)
+    .map((entry) => ({
     user_id: state.session.user.id,
     media_type: entry.mediaType,
     content_id: entry.id,
@@ -1493,6 +2041,35 @@ async function syncProgressToCloud() {
   }
 
   state.lastSyncAt = Date.now();
+}
+
+function shouldSyncProgressEntry(entry) {
+  const progress = Number(entry?.progress || 0);
+  const timestamp = Number(entry?.timestamp || 0);
+  return progress >= 98 || timestamp > 8 || progress > 1;
+}
+
+function dedupeProgressRows(entries) {
+  const map = new Map();
+  (entries || []).forEach((entry) => {
+    const mediaType = entry?.mediaType === "tv" ? "tv" : "movie";
+    const id = Number(entry?.id || 0);
+    if (!id) return;
+    const season = mediaType === "tv" ? Number(entry?.season || 1) : 1;
+    const episode = mediaType === "tv" ? Number(entry?.episode || 1) : 1;
+    const key = `${mediaType}:${id}:${season}:${episode}`;
+    const previous = map.get(key);
+    if (!previous || Number(entry?.updatedAt || 0) >= Number(previous?.updatedAt || 0)) {
+      map.set(key, {
+        ...entry,
+        mediaType,
+        id,
+        season,
+        episode
+      });
+    }
+  });
+  return [...map.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 }
 
 async function pullCloudProgress() {
@@ -1679,22 +2256,67 @@ function setStatus(message) {
 
 function setAuthHint(message) {
   el.authHint.textContent = message;
+  animateHint(el.authHint, message, "auth");
+  const tone = hintTone(message);
+  if (tone) showToast(message, tone);
+}
+
+function hintTone(message) {
+  const lowered = String(message || "").toLowerCase();
+  if (!lowered) return "";
+  const isError = lowered.includes("failed")
+    || lowered.includes("do not match")
+    || lowered.includes("provide")
+    || lowered.includes("enter")
+    || lowered.includes("wrong")
+    || lowered.includes("invalid")
+    || lowered.includes("already")
+    || lowered.includes("too many")
+    || lowered.includes("not found")
+    || lowered.includes("incorrect")
+    || lowered.includes("unavailable");
+  if (isError) return "error";
+  const isSuccess = lowered.includes("signed in")
+    || lowered.includes("signed out")
+    || lowered.includes("saved")
+    || lowered.includes("updated")
+    || lowered.includes("sent")
+    || lowered.includes("created")
+    || lowered.includes("confirmed")
+    || lowered.includes("check your email");
+  return isSuccess ? "success" : "";
+}
+
+function animateHint(node, message, scope) {
+  if (!node) return;
   const lowered = String(message || "").toLowerCase();
   const isError = lowered.includes("failed")
     || lowered.includes("do not match")
     || lowered.includes("provide")
     || lowered.includes("enter")
-    || lowered.includes("wrong");
-  if (isError) {
-    nudgeAuthCard();
-    el.authHint.classList.remove("auth-hint-flash");
-    void el.authHint.offsetWidth;
-    el.authHint.classList.add("auth-hint-flash");
-    window.clearTimeout(setAuthHint.flashTimer);
-    setAuthHint.flashTimer = window.setTimeout(() => {
-      el.authHint.classList.remove("auth-hint-flash");
-    }, 700);
-  }
+    || lowered.includes("wrong")
+    || lowered.includes("invalid")
+    || lowered.includes("already")
+    || lowered.includes("too many")
+    || lowered.includes("not found")
+    || lowered.includes("incorrect");
+  const isSuccess = lowered.includes("signed in")
+    || lowered.includes("signed out")
+    || lowered.includes("saved")
+    || lowered.includes("updated")
+    || lowered.includes("sent")
+    || lowered.includes("created")
+    || lowered.includes("check your email");
+  const className = isError ? `${scope}-hint-error` : (isSuccess ? `${scope}-hint-success` : `${scope}-hint-flash`);
+  node.classList.remove(`${scope}-hint-flash`, `${scope}-hint-success`, `${scope}-hint-error`);
+  void node.offsetWidth;
+  node.classList.add(className);
+  const timerKey = `${scope}HintTimer`;
+  window.clearTimeout(animateHint[timerKey]);
+  animateHint[timerKey] = window.setTimeout(() => {
+    node.classList.remove(`${scope}-hint-flash`, `${scope}-hint-success`, `${scope}-hint-error`);
+  }, 760);
+  if (isError) nudgeAuthCard();
 }
 
 function nudgeAuthCard() {
@@ -1715,6 +2337,12 @@ function isReleasedDate(value) {
   return Number.isFinite(timestamp) && timestamp <= Date.now();
 }
 
+function isRecentReleasedDate(value) {
+  if (!isReleasedDate(value)) return false;
+  const timestamp = Date.parse(`${value}T23:59:59Z`);
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= NEW_EPISODE_WINDOW_DAYS * 86400000;
+}
+
 function isEpisodeAfter(seasonA, episodeA, seasonB, episodeB) {
   if (Number(seasonA) !== Number(seasonB)) return Number(seasonA) > Number(seasonB);
   return Number(episodeA) > Number(episodeB);
@@ -1729,16 +2357,21 @@ function formatShortDate(value) {
   }).format(new Date(parsed));
 }
 
-function setPosterImage(image, item) {
+function setPosterImage(image, item, options = {}) {
   if (!image) return;
   const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = "eager";
+  image.loading = options.eager ? "eager" : "lazy";
   image.decoding = "async";
+  if (options.eager) image.fetchPriority = "high";
+  image.onload = () => image.classList.add("is-loaded");
   image.onerror = () => {
     image.onerror = null;
+    image.onload = null;
+    image.classList.add("is-loaded");
     image.src = fallback;
   };
   image.src = item?.poster || fallback;
+  if (!item?.poster) image.classList.add("is-loaded");
 }
 
 function buildPosterPlaceholder(title) {
@@ -1914,6 +2547,10 @@ function closeMegaMenu() {
 }
 
 function avatarDataUri(avatar) {
+  if (avatar?.id === "none") {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Default profile"><rect width="128" height="128" rx="32" fill="#102035"/><circle cx="64" cy="48" r="23" fill="#6f8aa5"/><path d="M24 112c5-25 21-39 40-39s35 14 40 39" fill="#6f8aa5"/></svg>`;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  }
   if (!avatar?.bg1) {
     const safeLabel = escapeHtml(avatar?.label || "Avatar");
     const initials = escapeHtml(String(avatar?.label || "AV").split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase() || "AV");

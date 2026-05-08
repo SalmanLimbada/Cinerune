@@ -506,7 +506,7 @@ export async function searchCatalog(query, options = {}) {
   };
 }
 
-export async function fetchItemDetailsById(id, mediaType) {
+export async function fetchItemDetailsById(id, mediaType, options = {}) {
   const normalizedType = mediaType === "tv" ? "tv" : "movie";
   const key = `${normalizedType}:${Number(id)}`;
   const cached = itemCache.get(key);
@@ -518,7 +518,7 @@ export async function fetchItemDetailsById(id, mediaType) {
   
   // For TV shows, use cached data only if recent (less than 1 hour for episode checks),
   // but always verify latest episode to catch new releases immediately
-  if (normalizedType === "tv" && cached?.plot && cached?.runtime && cached?.genre) {
+  if (normalizedType === "tv" && cached?.plot && cached?.runtime && cached?.genre && !options.forceEpisodeRefresh) {
     const cacheAge = Date.now() - (cached._episodeCachedAt || 0);
     const EPISODE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
     
@@ -600,8 +600,10 @@ async function findTrueLatestEpisode(tvId, totalSeasons) {
   
   if (results.length === 0) return null;
   
-  // Sort by season then episode, return the latest
+  // Sort by air date first so specials or late metadata do not look newer than recent releases.
   results.sort((a, b) => {
+    const dateDiff = (Date.parse(b.airDate) || 0) - (Date.parse(a.airDate) || 0);
+    if (dateDiff !== 0) return dateDiff;
     if (a.season !== b.season) return b.season - a.season;
     return b.episode - a.episode;
   });
@@ -643,6 +645,7 @@ function normalizeList(results, options = {}) {
     .map((item) => normalizeItem(item))
     .filter((item) => {
       if (!item || !item.title || (!item.poster && !item.backdrop)) return false;
+      if (!options.allowUnreleased && !isReleasedTitleDate(item.released)) return false;
       if (!isSensitiveItem(item)) return true;
       return Boolean(options.allowSensitiveExact && isExactSensitiveSearch(item, options.query));
     });
@@ -962,6 +965,12 @@ function normalizeSearchText(value) {
 
 function isReleasedAirDate(value) {
   if (!value) return false;
+  const timestamp = Date.parse(`${value}T23:59:59Z`);
+  return Number.isFinite(timestamp) && timestamp <= Date.now();
+}
+
+function isReleasedTitleDate(value) {
+  if (!value) return true;
   const timestamp = Date.parse(`${value}T23:59:59Z`);
   return Number.isFinite(timestamp) && timestamp <= Date.now();
 }

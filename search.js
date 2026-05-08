@@ -1,9 +1,9 @@
 import {
   initTmdb,
   searchCatalog
-} from "./catalog.js?v=20260501-fix1";
-import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
-import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
+} from "./catalog.js?v=20260508-toggle1";
+import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = {
@@ -107,18 +107,23 @@ function renderPosterCards(items) {
   });
 
   el.searchPageGrid.appendChild(fragment);
+  balancePosterGrid(el.searchPageGrid);
   initDragScroll();
 }
 
 function setPosterImage(image, item) {
   const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = "eager";
+  image.loading = "lazy";
   image.decoding = "async";
+  image.onload = () => image.classList.add("is-loaded");
   image.onerror = () => {
     image.onerror = null;
+    image.onload = null;
+    image.classList.add("is-loaded");
     image.src = fallback;
   };
   image.src = item?.poster || fallback;
+  if (!item?.poster) image.classList.add("is-loaded");
 }
 
 function buildPosterPlaceholder(title) {

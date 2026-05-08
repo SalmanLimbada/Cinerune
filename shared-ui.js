@@ -1,7 +1,9 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession, setStoredSession } from "./auth-client.js";
-import { initHeaderNotifications } from "./notifications.js?v=20260502-notifications1";
+import { initHeaderNotifications } from "./notifications.js?v=20260508-toggle1";
+import { showToast } from "./ui-toast.js";
 
 const avatarOptions = [
+  { id: "none", label: "No Avatar" },
   { id: "luffy", label: "Monkey D. Luffy", src: "https://avatarfiles.alphacoders.com/141/141955.png" },
   { id: "naruto", label: "Naruto Uzumaki", src: "https://avatarfiles.alphacoders.com/106/106708.jpg" },
   { id: "goku", label: "Goku", src: "https://avatarfiles.alphacoders.com/263/263487.png" },
@@ -23,6 +25,7 @@ export function initSharedHeader() {
   sharedHeaderRefs.label = label;
 
   ensureAccountMenuIcons(accountMenu);
+  ensureReportMenuItem(accountMenu, () => currentSession);
   bindSettingsMenu(accountMenu, () => currentSession);
   const headerActions = ensureHeaderActionsGroup();
   const bookmarksLink = ensureBookmarksLink(headerActions || notificationsWrap || accountWrap);
@@ -39,6 +42,13 @@ export function initSharedHeader() {
     renderSharedAccount(avatar, label, null);
     updateBookmarksLink(bookmarksLink, null);
   });
+  window.addEventListener("cinerune:session-updated", (event) => {
+    currentSession = event.detail || null;
+    renderSharedAccount(avatar, label, currentSession);
+    updateBookmarksLink(bookmarksLink, currentSession);
+    notificationsWrap?.toggleAttribute("hidden", !currentSession?.user);
+    if (currentSession?.user) void initHeaderNotifications();
+  });
 
   accountBtn?.addEventListener("click", async () => {
     if (!currentSession) {
@@ -50,11 +60,11 @@ export function initSharedHeader() {
       }
     }
     if (!currentSession?.user) {
-      window.location.href = "./index.html?auth=login";
+      openSharedAuthModal("login");
       return;
     }
     if (!accountMenu) {
-      window.location.href = "./index.html?auth=login";
+      openSharedAuthModal("login");
       return;
     }
     const hidden = accountMenu.hasAttribute("hidden");
@@ -67,10 +77,9 @@ export function initSharedHeader() {
     }
   });
 
-  signOut?.addEventListener("click", () => {
-    clearStoredSession();
+  signOut?.addEventListener("click", async () => {
+    await signOutSharedSession();
     currentSession = null;
-    renderSharedAccount(avatar, label, null);
     updateBookmarksLink(bookmarksLink, null);
     accountMenu?.setAttribute("hidden", "");
     document.getElementById("notificationsWrap")?.setAttribute("hidden", "");
@@ -86,9 +95,212 @@ export function initSharedHeader() {
   initHeaderNotifications();
 }
 
-export function openSettingsModal() {
+const sharedAuthState = {
+  modal: null,
+  hint: null,
+  mode: "login"
+};
+
+export function openSharedAuthModal(mode = "login") {
+  initSharedAuthModal();
+  sharedAuthState.mode = mode === "signup" ? "signup" : "login";
+  renderSharedAuthMode();
+  sharedAuthState.modal?.removeAttribute("hidden");
+}
+
+function initSharedAuthModal() {
+  if (sharedAuthState.modal) return;
+  const modal = document.createElement("section");
+  modal.className = "auth-modal";
+  modal.id = "sharedAuthModal";
+  modal.setAttribute("hidden", "");
+  modal.innerHTML = `
+    <div class="auth-backdrop" data-shared-auth-close></div>
+    <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="sharedAuthTitle">
+      <button class="auth-close" type="button" data-shared-auth-close aria-label="Close account dialog">x</button>
+      <div class="auth-mode-switch" role="tablist" aria-label="Account mode">
+        <button id="sharedLoginTab" class="auth-mode-btn active" type="button">Sign In</button>
+        <button id="sharedSignupTab" class="auth-mode-btn" type="button">Create Account</button>
+      </div>
+      <div id="sharedLoginView" class="account-grid">
+        <h2 id="sharedAuthTitle">Sign In</h2>
+        <label>
+          <span>Username or Email</span>
+          <input id="sharedAuthIdentifier" type="text" placeholder="username or email" maxlength="80" autocomplete="username" />
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="sharedAuthPassword" type="password" placeholder="your password" maxlength="128" autocomplete="current-password" />
+        </label>
+        <div class="account-actions">
+          <button id="sharedSignInBtn" class="pill-btn" type="button">Sign In</button>
+        </div>
+      </div>
+      <div id="sharedSignupView" class="account-grid" hidden>
+        <h2>Create Account</h2>
+        <div class="signup-field-group">
+          <label>
+            <span>Username</span>
+            <input id="sharedSignupUsername" type="text" placeholder="pick a username" maxlength="24" autocomplete="username" />
+          </label>
+        </div>
+        <div class="signup-field-group">
+          <label>
+            <span>Email <em>optional</em></span>
+            <input id="sharedSignupEmail" type="email" placeholder="you@example.com" maxlength="80" autocomplete="email" />
+          </label>
+          <label>
+            <span>Confirm Email <em>optional</em></span>
+            <input id="sharedSignupEmailConfirm" type="email" placeholder="re-enter your email" maxlength="80" autocomplete="email" />
+          </label>
+        </div>
+        <div class="signup-field-group">
+          <label>
+            <span>Password</span>
+            <input id="sharedSignupPassword" type="password" placeholder="create a password" maxlength="128" autocomplete="new-password" />
+          </label>
+          <label>
+            <span>Confirm Password</span>
+            <input id="sharedSignupConfirm" type="password" placeholder="re-enter your password" maxlength="128" autocomplete="new-password" />
+          </label>
+        </div>
+        <div class="account-actions">
+          <button id="sharedSignUpBtn" class="pill-btn" type="button">Create Account</button>
+        </div>
+      </div>
+      <p id="sharedAuthHint" class="tiny muted"></p>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  sharedAuthState.modal = modal;
+  sharedAuthState.hint = modal.querySelector("#sharedAuthHint");
+  modal.querySelectorAll("[data-shared-auth-close]").forEach((node) => {
+    node.addEventListener("click", closeSharedAuthModal);
+  });
+  modal.querySelector("#sharedLoginTab")?.addEventListener("click", () => {
+    sharedAuthState.mode = "login";
+    renderSharedAuthMode();
+  });
+  modal.querySelector("#sharedSignupTab")?.addEventListener("click", () => {
+    sharedAuthState.mode = "signup";
+    renderSharedAuthMode();
+  });
+  modal.querySelector("#sharedSignInBtn")?.addEventListener("click", signInSharedAuth);
+  modal.querySelector("#sharedSignUpBtn")?.addEventListener("click", signUpSharedAuth);
+  modal.querySelectorAll("input").forEach((input) => {
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      if (sharedAuthState.mode === "signup") {
+        void signUpSharedAuth();
+      } else {
+        void signInSharedAuth();
+      }
+    });
+  });
+}
+
+function renderSharedAuthMode() {
+  const loginMode = sharedAuthState.mode !== "signup";
+  const modal = sharedAuthState.modal;
+  modal?.querySelector("#sharedLoginTab")?.classList.toggle("active", loginMode);
+  modal?.querySelector("#sharedSignupTab")?.classList.toggle("active", !loginMode);
+  modal?.querySelector("#sharedLoginView")?.toggleAttribute("hidden", !loginMode);
+  modal?.querySelector("#sharedSignupView")?.toggleAttribute("hidden", loginMode);
+  setSharedAuthHint("");
+}
+
+function closeSharedAuthModal() {
+  sharedAuthState.modal?.setAttribute("hidden", "");
+}
+
+async function signInSharedAuth() {
+  const modal = sharedAuthState.modal;
+  const identifier = normalizeIdentifier(modal?.querySelector("#sharedAuthIdentifier")?.value || "");
+  const password = String(modal?.querySelector("#sharedAuthPassword")?.value || "");
+  if (!identifier || !isValidPassword(password)) {
+    setSharedAuthHint("Enter a valid username/email and password.");
+    return;
+  }
+  try {
+    const session = await apiRequest("/auth/login", {
+      method: "POST",
+      body: { identifier, password }
+    });
+    if (!session?.access_token) {
+      setSharedAuthHint("Username/email or password is wrong. Try again.");
+      return;
+    }
+    setStoredSession(session);
+    closeSharedAuthModal();
+    showToast("Signed in.", "success");
+  } catch {
+    setSharedAuthHint("Username/email or password is wrong. Try again.");
+  }
+}
+
+async function signUpSharedAuth() {
+  const modal = sharedAuthState.modal;
+  const username = normalizeUsername(modal?.querySelector("#sharedSignupUsername")?.value || "");
+  const email = normalizeEmail(modal?.querySelector("#sharedSignupEmail")?.value || "", true);
+  const emailConfirm = normalizeEmail(modal?.querySelector("#sharedSignupEmailConfirm")?.value || "", true);
+  const password = String(modal?.querySelector("#sharedSignupPassword")?.value || "");
+  const confirm = String(modal?.querySelector("#sharedSignupConfirm")?.value || "");
+  if (!username || !isValidPassword(password)) {
+    setSharedAuthHint("Provide a username and a password with 6+ characters.");
+    return;
+  }
+  if (email === null || emailConfirm === null) {
+    setSharedAuthHint("Enter a valid email address or leave both blank.");
+    return;
+  }
+  if ((email || emailConfirm) && email !== emailConfirm) {
+    setSharedAuthHint("Emails do not match.");
+    return;
+  }
+  if (password !== confirm) {
+    setSharedAuthHint("Passwords do not match.");
+    return;
+  }
+  try {
+    await apiRequest("/auth/signup", {
+      method: "POST",
+      body: { username, email: email || undefined, password, avatarId: "none" }
+    });
+    let session = null;
+    try {
+      session = await apiRequest("/auth/login", {
+        method: "POST",
+        body: { identifier: username, password }
+      });
+    } catch {
+      session = null;
+    }
+    if (!session?.access_token) {
+      setSharedAuthHint(email
+        ? "Account created. Check your email if confirmation is required, then sign in."
+        : "Account created. Sign in with your username and password.");
+      sharedAuthState.mode = "login";
+      renderSharedAuthMode();
+      return;
+    }
+    setStoredSession(session);
+    closeSharedAuthModal();
+    showToast("Account created.", "success");
+  } catch (error) {
+    setSharedAuthHint(getSharedFriendlyError(error));
+  }
+}
+
+function setSharedAuthHint(message) {
+  if (sharedAuthState.hint) sharedAuthState.hint.textContent = message;
+  const tone = sharedHintTone(message);
+  if (tone) showToast(message, tone);
+}
+
+export function openSettingsModal(panelName) {
   initSharedSettingsModal();
-  void openSharedSettingsModal();
+  void openSharedSettingsModal(panelName);
 }
 
 const sharedHeaderRefs = {
@@ -105,8 +317,14 @@ const settingsModalState = {
   accountAvatar: null,
   authUserEmail: null,
   signOutBtn: null,
+  deleteAccount: null,
+  deleteConfirm: null,
   username: null,
+  usernameConfirm: null,
+  currentUsernameDisplay: null,
   email: null,
+  emailConfirm: null,
+  currentEmailDisplay: null,
   currentPassword: null,
   password: null,
   confirm: null,
@@ -129,7 +347,7 @@ function bindSettingsMenu(menu, getSession) {
     event.preventDefault();
     const session = await ensureSession();
     if (!session?.user) {
-      window.location.href = "./index.html?auth=login";
+      openSharedAuthModal("login");
       return;
     }
     settingsModalState.session = session;
@@ -171,8 +389,16 @@ function initSharedSettingsModal() {
           </button>
           <div class="settings-section" data-settings-panel="username" hidden>
             <label>
+              <span>Current Username</span>
+              <input id="sharedCurrentUsernameDisplay" type="text" readonly />
+            </label>
+            <label>
               <span>New Username</span>
               <input id="sharedSettingsUsername" type="text" placeholder="new username" maxlength="24" autocomplete="username" />
+            </label>
+            <label>
+              <span>Confirm New Username</span>
+              <input id="sharedSettingsUsernameConfirm" type="text" placeholder="re-enter new username" maxlength="24" autocomplete="username" />
             </label>
             <div class="account-actions">
               <button id="sharedSaveUsername" class="pill-btn" type="button">Save Username</button>
@@ -188,8 +414,16 @@ function initSharedSettingsModal() {
           </button>
           <div class="settings-section" data-settings-panel="email" hidden>
             <label>
-              <span>Email Address</span>
+              <span>Current Email</span>
+              <input id="sharedCurrentEmailDisplay" type="email" readonly />
+            </label>
+            <label>
+              <span>New Email Address</span>
               <input id="sharedSettingsEmail" type="email" placeholder="you@example.com" maxlength="80" autocomplete="email" />
+            </label>
+            <label>
+              <span>Confirm New Email</span>
+              <input id="sharedSettingsEmailConfirm" type="email" placeholder="re-enter your email" maxlength="80" autocomplete="email" />
             </label>
             <div class="account-actions">
               <button id="sharedSaveEmail" class="pill-btn" type="button">Save Email</button>
@@ -234,6 +468,23 @@ function initSharedSettingsModal() {
             </div>
             <div id="sharedAvatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
           </div>
+
+          <button class="settings-action-toggle danger" type="button" data-settings-toggle="delete" aria-expanded="false">
+            <span>
+              <strong>Delete Account</strong>
+              <small>Permanently remove your account and saved progress.</small>
+            </span>
+            <span class="settings-action-icon" aria-hidden="true">+</span>
+          </button>
+          <div class="settings-section danger-zone" data-settings-panel="delete" hidden>
+            <label>
+              <span>Type DELETE to confirm</span>
+              <input id="sharedDeleteConfirm" type="text" placeholder="DELETE" maxlength="12" autocomplete="off" />
+            </label>
+            <div class="account-actions">
+              <button id="sharedDeleteAccount" class="pill-btn danger" type="button">Delete Account</button>
+            </div>
+          </div>
         </div>
 
         <p id="sharedSettingsHint" class="tiny muted"></p>
@@ -250,8 +501,14 @@ function initSharedSettingsModal() {
   settingsModalState.accountAvatar = modal.querySelector("#sharedAccountAvatar");
   settingsModalState.authUserEmail = modal.querySelector("#sharedAuthUserEmail");
   settingsModalState.signOutBtn = modal.querySelector("#sharedSignOutBtn");
+  settingsModalState.deleteAccount = modal.querySelector("#sharedDeleteAccount");
+  settingsModalState.deleteConfirm = modal.querySelector("#sharedDeleteConfirm");
   settingsModalState.username = modal.querySelector("#sharedSettingsUsername");
+  settingsModalState.usernameConfirm = modal.querySelector("#sharedSettingsUsernameConfirm");
+  settingsModalState.currentUsernameDisplay = modal.querySelector("#sharedCurrentUsernameDisplay");
   settingsModalState.email = modal.querySelector("#sharedSettingsEmail");
+  settingsModalState.emailConfirm = modal.querySelector("#sharedSettingsEmailConfirm");
+  settingsModalState.currentEmailDisplay = modal.querySelector("#sharedCurrentEmailDisplay");
   settingsModalState.currentPassword = modal.querySelector("#sharedSettingsCurrentPassword");
   settingsModalState.password = modal.querySelector("#sharedSettingsPassword");
   settingsModalState.confirm = modal.querySelector("#sharedSettingsPasswordConfirm");
@@ -266,31 +523,38 @@ function initSharedSettingsModal() {
   settingsModalState.saveUsername?.addEventListener("click", saveSharedUsername);
   settingsModalState.saveEmail?.addEventListener("click", saveSharedEmail);
   settingsModalState.savePassword?.addEventListener("click", saveSharedPassword);
+  settingsModalState.deleteAccount?.addEventListener("click", deleteSharedAccount);
   settingsModalState.signOutBtn?.addEventListener("click", signOutSharedSession);
   settingsModalState.actionToggles.forEach((button) => {
     button.addEventListener("click", () => toggleSharedSettingsPanel(button.dataset.settingsToggle));
   });
 }
 
-async function openSharedSettingsModal() {
+async function openSharedSettingsModal(initialPanelName) {
   if (!settingsModalState.modal) return;
   const session = settingsModalState.session || await ensureSession();
   if (!session?.user) {
-    window.location.href = "./index.html?auth=login";
+    openSharedAuthModal("login");
     return;
   }
   settingsModalState.session = session;
   settingsModalState.modal.removeAttribute("hidden");
   const meta = session.user.user_metadata || {};
-  if (settingsModalState.username) settingsModalState.username.value = meta.username || "";
-  if (settingsModalState.email) settingsModalState.email.value = displayEmail(session.user.email) || "";
+  if (settingsModalState.currentUsernameDisplay) settingsModalState.currentUsernameDisplay.value = meta.username || "";
+  if (settingsModalState.username) settingsModalState.username.value = "";
+  if (settingsModalState.usernameConfirm) settingsModalState.usernameConfirm.value = "";
+  if (settingsModalState.currentEmailDisplay) settingsModalState.currentEmailDisplay.value = displayEmail(session.user.email) || "No email added";
+  if (settingsModalState.email) settingsModalState.email.value = "";
+  if (settingsModalState.emailConfirm) settingsModalState.emailConfirm.value = "";
+  if (settingsModalState.deleteConfirm) settingsModalState.deleteConfirm.value = "";
+  updateSharedEmailSettingsLabels(session);
   if (settingsModalState.authUserEmail) {
     settingsModalState.authUserEmail.textContent = displayEmail(session.user.email)
       || meta.username
       || "Account";
   }
   if (settingsModalState.accountAvatar) {
-    const avatarId = normalizeAvatarId(meta.avatarId || readJson("cinerune:avatar-choice", "luffy"));
+    const avatarId = normalizeAvatarId(meta.avatarId || "none");
     settingsModalState.accountAvatar.referrerPolicy = "no-referrer";
     settingsModalState.accountAvatar.onerror = () => {
       settingsModalState.accountAvatar.onerror = null;
@@ -298,14 +562,32 @@ async function openSharedSettingsModal() {
     };
     settingsModalState.accountAvatar.src = avatarSrcById(avatarId);
   }
-  renderSharedAvatarPicker(meta.avatarId || readJson("cinerune:avatar-choice", "luffy"));
+  renderSharedAvatarPicker(meta.avatarId || "none");
   closeSharedSettingsPanels();
+  if (initialPanelName) {
+    toggleSharedSettingsPanel(initialPanelName);
+  }
   setSharedSettingsHint("");
 }
 
 function closeSharedSettingsModal() {
   if (!settingsModalState.modal) return;
   settingsModalState.modal.setAttribute("hidden", "");
+}
+
+function updateSharedEmailSettingsLabels(session) {
+  const hasPublicEmail = Boolean(displayEmail(session?.user?.email || ""));
+  settingsModalState.modal?.querySelectorAll('[data-settings-toggle="email"] strong').forEach((node) => {
+    node.textContent = hasPublicEmail ? "Change Email" : "Add Email";
+  });
+  settingsModalState.modal?.querySelectorAll('[data-settings-toggle="email"] small').forEach((node) => {
+    node.textContent = hasPublicEmail
+      ? "Update the email used for login and password reset."
+      : "Add a login backup and password reset address.";
+  });
+  if (settingsModalState.saveEmail) {
+    settingsModalState.saveEmail.textContent = hasPublicEmail ? "Change Email" : "Save Email";
+  }
 }
 
 function toggleSharedSettingsPanel(panelName) {
@@ -351,7 +633,23 @@ function renderSharedAvatarPicker(activeId) {
 
 async function persistSharedAvatarChoice(avatarId) {
   const normalized = normalizeAvatarId(avatarId);
+  const previous = normalizeAvatarId(settingsModalState.session?.user?.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "none"));
   localStorage.setItem("cinerune:avatar-choice", JSON.stringify(normalized));
+  if (settingsModalState.accountAvatar) {
+    settingsModalState.accountAvatar.src = avatarSrcById(normalized);
+    settingsModalState.accountAvatar.alt = `${avatarOptions.find((option) => option.id === normalized)?.label || "Avatar"} avatar`;
+  }
+  renderSharedAvatarPicker(normalized);
+  renderSharedAccount(sharedHeaderRefs.avatar, sharedHeaderRefs.label, {
+    ...(settingsModalState.session || {}),
+    user: {
+      ...(settingsModalState.session?.user || {}),
+      user_metadata: {
+        ...(settingsModalState.session?.user?.user_metadata || {}),
+        avatarId: normalized
+      }
+    }
+  });
   const session = await ensureSession();
   if (!session?.user) return;
   try {
@@ -368,20 +666,117 @@ async function persistSharedAvatarChoice(avatarId) {
       settingsModalState.accountAvatar.src = avatarSrcById(normalized);
     }
     renderSharedAvatarPicker(normalized);
+    setSharedSettingsHint("Avatar updated.");
   } catch (error) {
-    setSharedSettingsHint(`Update failed: ${error.message}`);
+    localStorage.setItem("cinerune:avatar-choice", JSON.stringify(previous));
+    renderSharedAvatarPicker(previous);
+    if (settingsModalState.accountAvatar) {
+      settingsModalState.accountAvatar.src = avatarSrcById(previous);
+    }
+    renderSharedAccount(sharedHeaderRefs.avatar, sharedHeaderRefs.label, settingsModalState.session);
+    setSharedSettingsHint(getSharedFriendlyError(error));
   }
 }
 
-function signOutSharedSession() {
+function getSharedFriendlyError(error) {
+  const msg = String(error?.message || error || "").toLowerCase();
+  if (msg.includes("already") && msg.includes("use")) return "This email is already in use.";
+  if (msg.includes("invalid") || msg.includes("wrong")) return "That value is not valid.";
+  if (msg.includes("too many") || msg.includes("rate")) return "Too many attempts. Try again in a few minutes.";
+  if (msg.includes("confirm")) return "Check your email to confirm the change.";
+  return "Could not complete that action. Try again.";
+}
+
+async function signOutSharedSession() {
+  try {
+    const session = await ensureSession();
+    if (session?.access_token) {
+      await apiRequest("/auth/logout", {
+        method: "POST",
+        headers: authHeaders(session)
+      });
+    }
+  } catch {
+    // ignore logout failures
+  }
+
   clearStoredSession();
   settingsModalState.session = null;
   renderSharedAccount(sharedHeaderRefs.avatar, sharedHeaderRefs.label, null);
   closeSharedSettingsModal();
+  window.dispatchEvent(new CustomEvent("cinerune:session-updated", { detail: null }));
+  if (shouldRedirectAfterSignOut()) {
+    window.location.href = "./index.html";
+  }
+}
+
+function shouldRedirectAfterSignOut() {
+  const path = window.location.pathname.replace(/\/+$/, "").toLowerCase();
+  return path.endsWith("/lists")
+    || path.endsWith("/lists.html")
+    || path.endsWith("/inbox")
+    || path.endsWith("/inbox.html");
 }
 
 function setSharedSettingsHint(message) {
   if (settingsModalState.hint) settingsModalState.hint.textContent = message;
+  animateSharedHint(settingsModalState.hint, message);
+  const tone = sharedHintTone(message);
+  if (tone) showToast(message, tone);
+}
+
+function sharedHintTone(message) {
+  const lowered = String(message || "").toLowerCase();
+  if (!lowered) return "";
+  const isError = lowered.includes("failed")
+    || lowered.includes("do not match")
+    || lowered.includes("provide")
+    || lowered.includes("enter")
+    || lowered.includes("wrong")
+    || lowered.includes("invalid")
+    || lowered.includes("already")
+    || lowered.includes("too many")
+    || lowered.includes("not found")
+    || lowered.includes("incorrect");
+  if (isError) return "error";
+  const isSuccess = lowered.includes("signed in")
+    || lowered.includes("signed out")
+    || lowered.includes("saved")
+    || lowered.includes("updated")
+    || lowered.includes("sent")
+    || lowered.includes("created")
+    || lowered.includes("check your email");
+  return isSuccess ? "success" : "";
+}
+
+function animateSharedHint(node, message) {
+  if (!node) return;
+  const lowered = String(message || "").toLowerCase();
+  const isError = lowered.includes("failed")
+    || lowered.includes("do not match")
+    || lowered.includes("provide")
+    || lowered.includes("enter")
+    || lowered.includes("wrong")
+    || lowered.includes("invalid")
+    || lowered.includes("already")
+    || lowered.includes("too many")
+    || lowered.includes("not found")
+    || lowered.includes("incorrect");
+  const isSuccess = lowered.includes("signed in")
+    || lowered.includes("signed out")
+    || lowered.includes("saved")
+    || lowered.includes("updated")
+    || lowered.includes("sent")
+    || lowered.includes("created")
+    || lowered.includes("check your email");
+  const className = isError ? "shared-hint-error" : (isSuccess ? "shared-hint-success" : "shared-hint-flash");
+  node.classList.remove("shared-hint-flash", "shared-hint-success", "shared-hint-error");
+  void node.offsetWidth;
+  node.classList.add(className);
+  window.clearTimeout(animateSharedHint.timer);
+  animateSharedHint.timer = window.setTimeout(() => {
+    node.classList.remove("shared-hint-flash", "shared-hint-success", "shared-hint-error");
+  }, 760);
 }
 
 async function saveSharedUsername() {
@@ -391,8 +786,13 @@ async function saveSharedUsername() {
     return;
   }
   const username = normalizeUsername(settingsModalState.username?.value);
+  const usernameConfirm = normalizeUsername(settingsModalState.usernameConfirm?.value);
   if (!username) {
     setSharedSettingsHint("Provide a username with 3-24 letters, numbers, dots, underscores, or dashes.");
+    return;
+  }
+  if (username !== usernameConfirm) {
+    setSharedSettingsHint("Usernames do not match.");
     return;
   }
   try {
@@ -402,9 +802,12 @@ async function saveSharedUsername() {
       body: { username }
     });
     applySharedSessionUpdate(session, updated?.user || updated, { username });
+    if (settingsModalState.currentUsernameDisplay) settingsModalState.currentUsernameDisplay.value = username;
+    if (settingsModalState.username) settingsModalState.username.value = "";
+    if (settingsModalState.usernameConfirm) settingsModalState.usernameConfirm.value = "";
     setSharedSettingsHint("Username updated.");
   } catch (error) {
-    setSharedSettingsHint(`Update failed: ${error.message}`);
+    setSharedSettingsHint(getSharedFriendlyError(error));
   }
 }
 
@@ -415,8 +818,13 @@ async function saveSharedEmail() {
     return;
   }
   const email = normalizeEmail(settingsModalState.email?.value || "", true);
+  const emailConfirm = normalizeEmail(settingsModalState.emailConfirm?.value || "", true);
   if (!email) {
     setSharedSettingsHint("Enter a valid email address.");
+    return;
+  }
+  if (email !== emailConfirm) {
+    setSharedSettingsHint("Emails do not match.");
     return;
   }
   try {
@@ -426,10 +834,29 @@ async function saveSharedEmail() {
       body: { email }
     });
     applySharedSessionUpdate(session, updated?.user || updated, { email });
-    setSharedSettingsHint("Email saved.");
+    if (settingsModalState.email) settingsModalState.email.value = "";
+    if (settingsModalState.emailConfirm) settingsModalState.emailConfirm.value = "";
+    if (!updated?.pendingEmailConfirmation && settingsModalState.currentEmailDisplay) {
+      settingsModalState.currentEmailDisplay.value = email;
+    }
+    setSharedSettingsHint(updated?.pendingEmailConfirmation
+      ? "Check your email to confirm the new address."
+      : "Email saved.");
+    await refreshSharedCurrentUser();
   } catch (error) {
-    setSharedSettingsHint(`Update failed: ${error.message}`);
+    setSharedSettingsHint(getSharedFriendlyError(error));
   }
+}
+
+async function refreshSharedCurrentUser() {
+  const session = await ensureSession();
+  if (!session?.access_token) return;
+  const currentUser = await apiRequest("/auth/me", {
+    method: "GET",
+    headers: authHeaders(session)
+  });
+  if (!currentUser?.user && !currentUser?.id) return;
+  applySharedSessionUpdate(session, currentUser?.user || currentUser);
 }
 
 async function saveSharedPassword() {
@@ -465,8 +892,44 @@ async function saveSharedPassword() {
     if (settingsModalState.confirm) settingsModalState.confirm.value = "";
     setSharedSettingsHint("Password updated.");
   } catch (error) {
-    setSharedSettingsHint(`Update failed: ${error.message}`);
+    setSharedSettingsHint(getSharedFriendlyError(error));
   }
+}
+
+async function deleteSharedAccount() {
+  const session = await ensureSession();
+  if (!session?.user) {
+    setSharedSettingsHint("Sign in first.");
+    return;
+  }
+  if (String(settingsModalState.deleteConfirm?.value || "").trim() !== "DELETE") {
+    setSharedSettingsHint("Type DELETE to confirm account deletion.");
+    return;
+  }
+  try {
+    await apiRequest("/auth/delete", {
+      method: "POST",
+      headers: authHeaders(session)
+    });
+    clearUserLocalData(session);
+    clearStoredSession();
+    settingsModalState.session = null;
+    renderSharedAccount(sharedHeaderRefs.avatar, sharedHeaderRefs.label, null);
+    closeSharedSettingsModal();
+    window.location.href = "./index.html";
+  } catch (error) {
+    setSharedSettingsHint(getSharedFriendlyError(error));
+  }
+}
+
+function clearUserLocalData(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  if (!userId) return;
+  [
+    `cinerune:progress:user:${userId}`,
+    `cinerune:bookmarks:user:${userId}`,
+    `cinerune:notification-read:user:${userId}`
+  ].forEach((key) => localStorage.removeItem(key));
 }
 
 function applySharedSessionUpdate(session, user, metadataPatch = {}) {
@@ -501,6 +964,15 @@ function normalizeUsername(value) {
   return /^[a-z0-9._-]{3,24}$/.test(trimmed) ? trimmed : "";
 }
 
+function normalizeIdentifier(value) {
+  const trimmed = sanitizeText(value, 80).toLowerCase();
+  if (!trimmed) return "";
+  if (trimmed.includes("@")) {
+    return /.+@.+\..+/.test(trimmed) ? trimmed : "";
+  }
+  return /^[a-z0-9._-]{3,24}$/.test(trimmed) ? trimmed : "";
+}
+
 function normalizeEmail(value, allowBlank = false) {
   const trimmed = sanitizeText(value, 80).toLowerCase();
   if (!trimmed) return allowBlank ? "" : null;
@@ -509,7 +981,7 @@ function normalizeEmail(value, allowBlank = false) {
 
 function displayEmail(value) {
   const email = normalizeEmail(value || "", true);
-  if (!email || email.endsWith("@cinerune.user")) return "";
+  if (!email || email.endsWith("@cinerune.user") || email.endsWith("@users.cinerune.app")) return "";
   return email;
 }
 
@@ -534,6 +1006,7 @@ function ensureAccountMenuIcons(menu) {
     inbox: "<svg viewBox=\"0 0 24 24\"><path d=\"M4 6h16v12H4z\"/><path d=\"M4 7l8 6 8-6\"/></svg>",
     bookmarks: "<svg viewBox=\"0 0 24 24\"><path d=\"M6 4h12v16l-6-4-6 4z\"/></svg>",
     "continue watching": "<svg viewBox=\"0 0 24 24\"><path d=\"M8 5l11 7-11 7z\"/></svg>",
+    report: "<svg viewBox=\"0 0 24 24\"><path d=\"M8 6l-2-2\"/><path d=\"M16 6l2-2\"/><path d=\"M9 9h6\"/><path d=\"M8 13h8\"/><path d=\"M9 17h6\"/><rect x=\"7\" y=\"6\" width=\"10\" height=\"14\" rx=\"5\"/><path d=\"M3 13h4\"/><path d=\"M17 13h4\"/></svg>",
     "sign out": "<svg viewBox=\"0 0 24 24\"><path d=\"M10 5v14\"/><path d=\"M16 12H4\"/><path d=\"M16 12l-4-4\"/><path d=\"M16 12l-4 4\"/></svg>"
   };
 
@@ -548,6 +1021,90 @@ function ensureAccountMenuIcons(menu) {
     span.innerHTML = icon;
     item.insertBefore(span, item.firstChild);
   });
+}
+
+function ensureReportMenuItem(menu, getSession) {
+  if (!menu || menu.querySelector("[data-open-report]")) return;
+  const button = document.createElement("button");
+  button.className = "account-menu-item";
+  button.type = "button";
+  button.dataset.openReport = "true";
+  button.innerHTML = `
+    <span class="menu-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M8 6l-2-2"/><path d="M16 6l2-2"/><path d="M9 9h6"/><path d="M8 13h8"/><path d="M9 17h6"/><rect x="7" y="6" width="10" height="14" rx="5"/><path d="M3 13h4"/><path d="M17 13h4"/></svg>
+    </span>
+    <span>Report</span>
+  `;
+  const signOut = menu.querySelector(".destructive, #signOutMenuBtn");
+  menu.insertBefore(button, signOut || null);
+  button.addEventListener("click", () => {
+    menu.setAttribute("hidden", "");
+    openSharedReportDialog(getSession?.() || null);
+  });
+}
+
+function openSharedReportDialog(session) {
+  let dialog = document.getElementById("sharedReportDialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "sharedReportDialog";
+    dialog.className = "report-dialog";
+    dialog.innerHTML = `
+      <form id="sharedReportForm" method="dialog">
+        <h3>Send Report</h3>
+        <p class="tiny muted">Report a bug, request a movie, or request a show.</p>
+        <textarea id="sharedReportMessage" rows="4" placeholder="Write your report or request"></textarea>
+        <div class="account-actions">
+          <button id="sharedReportCancel" class="pill-btn ghost" value="cancel" type="button">Cancel</button>
+          <button class="pill-btn" value="submit" type="submit">Send Report</button>
+        </div>
+      </form>
+    `;
+    document.body.appendChild(dialog);
+    dialog.querySelector("#sharedReportCancel")?.addEventListener("click", () => dialog.close("cancel"));
+    dialog.querySelector("#sharedReportForm")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = dialog.querySelector("#sharedReportMessage");
+      const message = sanitizeText(input?.value || "", 500);
+      if (input && input.value !== message) input.value = message;
+      if (!message) {
+        setSharedSettingsHint("Write a report message first.");
+        return;
+      }
+      const report = {
+        page: window.location.pathname,
+        message,
+        createdAt: Date.now(),
+        userId: session?.user?.id || ""
+      };
+      saveSharedLocalReport(report);
+      void submitSharedReportToServer(report);
+      dialog.close("submit");
+      showToast("Report saved.", "success");
+    });
+  }
+  const textarea = dialog.querySelector("#sharedReportMessage");
+  if (textarea) textarea.value = "";
+  dialog.showModal();
+}
+
+function saveSharedLocalReport(report) {
+  const reports = readJson("cinerune:reports", []);
+  reports.unshift(report);
+  localStorage.setItem("cinerune:reports", JSON.stringify(reports.slice(0, 200)));
+}
+
+async function submitSharedReportToServer(report) {
+  try {
+    const session = await ensureSession();
+    await apiRequest("/report", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: report
+    });
+  } catch {
+    // Keep the local fallback if no reports table exists yet.
+  }
 }
 
 function ensureHeaderActionsGroup() {
@@ -592,7 +1149,7 @@ function updateBookmarksLink(link, session) {
 
 function renderSharedAccount(avatarEl, labelEl, session) {
   const signedIn = Boolean(session?.user);
-  const avatarId = normalizeAvatarId(session?.user?.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "luffy"));
+  const avatarId = normalizeAvatarId(session?.user?.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "none"));
   if (avatarEl) {
     avatarEl.toggleAttribute("hidden", !signedIn);
     if (signedIn) {
@@ -615,7 +1172,7 @@ function renderSharedAccount(avatarEl, labelEl, session) {
 }
 
 export function normalizeAvatarId(value) {
-  const fallback = avatarOptions[0]?.id || "luffy";
+  const fallback = avatarOptions[0]?.id || "none";
   return avatarOptions.some((option) => option.id === value) ? value : fallback;
 }
 
@@ -625,6 +1182,10 @@ export function avatarSrcById(value) {
 }
 
 export function avatarDataUri(avatar) {
+  if (avatar?.id === "none") {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Default profile"><rect width="128" height="128" rx="32" fill="#102035"/><circle cx="64" cy="48" r="23" fill="#6f8aa5"/><path d="M24 112c5-25 21-39 40-39s35 14 40 39" fill="#6f8aa5"/></svg>`;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  }
   if (!avatar?.bg1) {
     const safeLabel = escapeHtml(avatar?.label || "Avatar");
     const initials = escapeHtml(String(avatar?.label || "AV").split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase() || "AV");

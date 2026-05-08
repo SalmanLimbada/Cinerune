@@ -4,10 +4,10 @@ import {
   titleById,
   posterById,
   isSensitiveCatalogItem
-} from "./catalog.js?v=20260501-fix1";
+} from "./catalog.js?v=20260508-toggle1";
 import { ensureSession } from "./auth-client.js";
-import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
-import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
+import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
 
 const bookmarksBaseKey = "cinerune:bookmarks";
 const progressBaseKey = "cinerune:progress";
@@ -47,6 +47,10 @@ async function boot() {
 
 
   await initAuth();
+  if (!state.session?.user) {
+    window.location.replace("./index.html");
+    return;
+  }
 
   if (query.get("view") === "continue") {
     await renderContinuePage();
@@ -85,7 +89,7 @@ async function renderContinuePage() {
 
   const progress = readJson(getProgressKey(state.session), readJson(legacyProgressKey, {}));
   const entries = dedupeContinueEntries(Object.values(progress || {})
-    .filter((entry) => Number(entry.timestamp || 0) > 20 && Number(entry.progress || 0) < 98));
+    .filter((entry) => Number(entry.timestamp || 0) > 8 && Number(entry.progress || 0) < 98));
 
   if (!entries.length) {
     el.bookmarksStatus.textContent = "No continue watching titles yet.";
@@ -145,6 +149,7 @@ async function hydrateProgressEntries(entries) {
     poster: entry.poster || posterById(entry.id, entry.mediaType) || "",
     year: "",
     progressPercent: Math.max(0, Math.min(100, Number(entry.progress || 0))),
+    resumeSeconds: Number(entry.timestamp || 0),
     progressMeta: entry.mediaType === "tv"
       ? `S${entry.season || 1} E${entry.episode || 1} | ${formatSeconds(entry.timestamp)}`
       : `${Math.round(Number(entry.progress || 0))}% | ${formatSeconds(entry.timestamp)}`
@@ -187,7 +192,7 @@ function renderList(container, entries, options = {}) {
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
     if (item.progressMeta) {
-      sub.textContent = item.progressMeta;
+      renderContinueMeta(sub, item);
       sub.classList.add("continue-meta");
     } else {
       sub.classList.remove("continue-meta");
@@ -221,6 +226,7 @@ function renderList(container, entries, options = {}) {
   });
 
   container.appendChild(fragment);
+  balancePosterGrid(container);
   initDragScroll();
 }
 
@@ -259,6 +265,23 @@ function renderEmpty(container) {
   container.innerHTML = '<p class="tiny muted">Empty</p>';
 }
 
+function renderContinueMeta(container, item) {
+  container.textContent = "";
+  const main = document.createElement("span");
+  main.className = "continue-meta-main";
+  const extra = document.createElement("span");
+  extra.className = "continue-meta-extra";
+
+  if (item.mediaType === "tv") {
+    main.textContent = `S${item.season || 1} E${item.episode || 1}`;
+    extra.textContent = formatSeconds(item.resumeSeconds || 0);
+  } else {
+    main.textContent = `${Math.round(Number(item.progressPercent || 0))}%`;
+    extra.textContent = formatSeconds(item.resumeSeconds || 0);
+  }
+  container.append(main, extra);
+}
+
 function openWatchPage(id, mediaType, season = 1, episode = 1, resume = false) {
   const url = new URL("./watch.html", window.location.href);
   url.searchParams.set("id", String(id));
@@ -289,13 +312,17 @@ function buildWatchHref(id, mediaType, season = 1, episode = 1, resume = false) 
 
 function setPosterImage(image, item) {
   const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = "eager";
+  image.loading = "lazy";
   image.decoding = "async";
+  image.onload = () => image.classList.add("is-loaded");
   image.onerror = () => {
     image.onerror = null;
+    image.onload = null;
+    image.classList.add("is-loaded");
     image.src = fallback;
   };
   image.src = item?.poster || fallback;
+  if (!item?.poster) image.classList.add("is-loaded");
 }
 
 function hideBookmarkSections() {

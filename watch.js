@@ -1,7 +1,8 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession } from "./auth-client.js";
-import { avatarDataUri, avatarSrcById, normalizeAvatarId, openSettingsModal } from "./shared-ui.js?v=20260502-notifications1";
-import { initHeaderNotifications } from "./notifications.js?v=20260502-notifications1";
-import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
+import { avatarDataUri, avatarSrcById, normalizeAvatarId, openSettingsModal, openSharedAuthModal } from "./shared-ui.js?v=20260508-toggle1";
+import { initHeaderNotifications } from "./notifications.js?v=20260508-toggle1";
+import { initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
+import { showToast } from "./ui-toast.js";
 import {
   initTmdb,
   fetchItemDetailsById,
@@ -11,9 +12,9 @@ import {
   seasonCount,
   titleById,
   posterById
-} from "./catalog.js?v=20260501-fix1";
+} from "./catalog.js?v=20260508-toggle1";
 
-const PLAYER_BASE = "https://www.vidking.net/embed";
+const PLAYER_BASE = "https://www.vidking.net";
 const VIDSRC_BASE = "https://vidsrc-embed.ru/embed";
 const settingsKey = "cinerune:settings";
 const legacyProgressKey = "cinerune:progress";
@@ -93,6 +94,7 @@ const state = {
   lastPlayerEventAt: 0,
   lastPlaybackTime: 0,
   playerSupportsCommands: true,
+  playerLoadedAt: 0,
   serverProgressTimer: null,
   serverProgressStartedAt: 0,
   serverProgressBaseTimestamp: 0,
@@ -170,7 +172,7 @@ function bindEvents() {
       if (state.session?.user) {
         toggleWatchAccountMenu();
       } else {
-          window.location.href = "./index.html?auth=login";
+        openSharedAuthModal("login");
       }
     });
   }
@@ -182,6 +184,7 @@ function bindEvents() {
       openSettingsModal();
     });
   }
+  ensureWatchReportMenuItem();
 
   if (el.watchSignOutBtn) {
     el.watchSignOutBtn.addEventListener("click", () => {
@@ -237,6 +240,10 @@ function bindEvents() {
     el.reportDialog.showModal();
   });
 
+  el.playerFrame?.addEventListener("load", () => {
+    state.playerLoadedAt = Date.now();
+  });
+
   el.cancelReport.addEventListener("click", () => {
     el.reportDialog.close("cancel");
   });
@@ -249,6 +256,18 @@ function bindEvents() {
   window.addEventListener("message", onPlayerMessage);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") queueAutoSync(true);
+  });
+  window.addEventListener("beforeunload", () => queueAutoSync(true));
+  window.addEventListener("storage", (event) => {
+    if (event.key !== "cinerune:session") return;
+    void initAuth();
+  });
+  window.addEventListener("cinerune:session-updated", (event) => {
+    state.session = event.detail || null;
+    syncProgressState();
+    state.bookmarks = readJson(getBookmarksKey(state.session), {});
+    syncBookmarkButton();
+    renderWatchAccountUI();
   });
 }
 
@@ -328,6 +347,12 @@ async function refillEpisodeGrid() {
     button.type = "button";
     button.className = "episode-pill";
     button.dataset.episode = String(episode);
+    if (episodeInfo.airDate) {
+      const dateText = formatEpisodeDate(episodeInfo.airDate);
+      button.title = dateText ? `Aired ${dateText}` : `Air date: ${episodeInfo.airDate}`;
+      button.dataset.airDate = dateText || episodeInfo.airDate;
+      button.setAttribute("aria-label", `${episodeInfo.name || `Episode ${episode}`}, aired ${dateText || episodeInfo.airDate}`);
+    }
     button.textContent = `EP${episode}: ${episodeInfo.name || `Episode ${episode}`}`;
     button.classList.toggle("active", episode === state.episode);
     button.addEventListener("click", () => playEpisode(episode));
@@ -340,6 +365,12 @@ async function refillEpisodeGrid() {
       ? `Season ${state.season} has ${totalEpisodes} episode${totalEpisodes === 1 ? "" : "s"}.`
       : `Season ${state.season} has no episodes yet.`;
   }
+}
+
+function formatEpisodeDate(value) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 function playEpisode(episode) {
@@ -404,7 +435,8 @@ function loadPlayer() {
   state.resumeSeekAttempts = 0;
   el.playerFrame.src = "";
   const serverId = normalizeServerId(state.playerServer);
-  state.playerSupportsCommands = serverId === "vidking";
+  state.playerSupportsCommands = false;
+  state.playerLoadedAt = 0;
 
   const url = buildPlayerUrl(serverId);
 
@@ -551,13 +583,17 @@ async function renderRelated() {
 function setPosterImage(image, item) {
   if (!image) return;
   const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = "eager";
+  image.loading = "lazy";
   image.decoding = "async";
+  image.onload = () => image.classList.add("is-loaded");
   image.onerror = () => {
     image.onerror = null;
+    image.onload = null;
+    image.classList.add("is-loaded");
     image.src = fallback;
   };
   image.src = item?.poster || fallback;
+  if (!item?.poster) image.classList.add("is-loaded");
 }
 
 function buildPosterPlaceholder(title) {
@@ -607,18 +643,35 @@ function submitReport() {
     return;
   }
 
-  state.reports.unshift({
+  const report = {
     id: state.id,
+    contentId: state.id,
     mediaType: state.mediaType,
     title: state.item?.title || titleById(state.id, state.mediaType) || `Title ${state.id}`,
     poster: state.item?.poster || posterById(state.id, state.mediaType) || "",
     message,
+    page: window.location.pathname,
     createdAt: Date.now()
-  });
+  };
 
+  state.reports.unshift(report);
   localStorage.setItem(reportsKey, JSON.stringify(state.reports.slice(0, 200)));
+  void submitReportToServer(report);
   el.reportDialog.close("submit");
   setStatus("Report submitted. Thank you.");
+}
+
+async function submitReportToServer(report) {
+  try {
+    const session = await ensureSession();
+    await apiRequest("/report", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: report
+    });
+  } catch {
+    // Local report storage is the fallback if the reports table is not configured.
+  }
 }
 
 function sanitizeText(value, maxLen) {
@@ -650,12 +703,21 @@ function syncProgressState() {
 function syncBookmarkButton() {
   if (!el.bookmarkTrigger || !el.bookmarkMenu || !state.item) return;
 
+  if (!state.session?.user) {
+    el.bookmarkTrigger.setAttribute("hidden", "");
+    el.bookmarkMenu.setAttribute("hidden", "");
+    el.bookmarkTrigger.classList.remove("active");
+    el.bookmarkTrigger.setAttribute("aria-expanded", "false");
+    return;
+  } else {
+    el.bookmarkTrigger.removeAttribute("hidden");
+  }
+
   const current = state.bookmarks[`${state.mediaType}:${state.id}`] || null;
   const removeOption = el.bookmarkMenu.querySelector(".bookmark-clear");
   if (removeOption) {
     removeOption.toggleAttribute("hidden", !current);
   }
-  el.bookmarkTrigger.textContent = "Bookmark";
   el.bookmarkTrigger.classList.toggle("active", Boolean(current) || !el.bookmarkMenu.hasAttribute("hidden"));
   el.bookmarkTrigger.setAttribute("aria-expanded", el.bookmarkMenu.hasAttribute("hidden") ? "false" : "true");
 
@@ -689,15 +751,29 @@ async function onPlayerMessage(event) {
   if (parsed?.type !== "PLAYER_EVENT" || !parsed?.data) return;
   const data = parsed.data;
   if (!data.id || !data.mediaType) return;
-  stopFallbackProgress();
-
   const mediaType = data.mediaType === "tv" ? "tv" : "movie";
   const id = Number(data.id);
   const season = Number(data.season) || state.season || 1;
   const episode = Number(data.episode) || state.episode || 1;
   const key = `${mediaType}:${id}:${season}:${episode}`;
   const isCurrentTitle = mediaType === state.mediaType && id === Number(state.id);
+  const incomingTimestamp = Number(data.currentTime) || 0;
+  const incomingProgress = Number(data.progress) || 0;
+  const existing = state.progress[key] || null;
+
+  if (
+    existing
+    && data.event !== "ended"
+    && Number(existing.timestamp || 0) > 20
+    && Number(existing.progress || 0) < 98
+    && incomingTimestamp < 5
+    && incomingProgress <= 1
+  ) {
+    return;
+  }
+
   state.lastPlayerEventAt = Date.now();
+  stopFallbackProgress();
 
   if (isCurrentTitle && mediaType === "tv" && (season !== state.season || episode !== state.episode)) {
     state.season = season;
@@ -706,7 +782,7 @@ async function onPlayerMessage(event) {
   }
 
   if (Number.isFinite(Number(data.currentTime))) {
-    state.lastPlaybackTime = Math.max(0, Number(data.currentTime) || 0);
+    state.lastPlaybackTime = Math.max(0, incomingTimestamp);
   }
 
   if (state.resumeTarget > 0 && state.lastPlaybackTime >= state.resumeTarget - 2) {
@@ -726,9 +802,9 @@ async function onPlayerMessage(event) {
     id,
     season,
     episode,
-    timestamp: Number(data.currentTime) || 0,
+    timestamp: incomingTimestamp,
     duration: Number(data.duration) || 0,
-    progress: Number(data.progress) || 0,
+    progress: incomingProgress,
     updatedAt: Date.now(),
     title: state.item?.title || titleById(id, mediaType) || `Title ${id}`,
     poster: state.item?.poster || posterById(id, mediaType) || ""
@@ -765,10 +841,15 @@ function startFallbackProgress() {
       stopFallbackProgress();
       return;
     }
+    if (document.visibilityState === "hidden") return;
     const elapsedSeconds = Math.floor((Date.now() - state.serverProgressStartedAt) / 1000);
-    if (elapsedSeconds < 25) return;
+    const loadedLongEnough = state.playerLoadedAt && Date.now() - state.playerLoadedAt > 30000;
+    if (elapsedSeconds < 35 || !loadedLongEnough) return;
     const timestamp = Math.max(0, state.serverProgressBaseTimestamp + elapsedSeconds);
-    const progress = Math.max(Number(existing?.progress || 0), Math.min(95, Math.round(timestamp / 60)));
+    const duration = Number(existing?.duration || 0);
+    const progress = duration > 0
+      ? Math.max(Number(existing?.progress || 0), Math.min(95, (timestamp / duration) * 100))
+      : Math.max(Number(existing?.progress || 0), Math.min(95, Math.round(timestamp / 60)));
     state.progress[key] = {
       mediaType: state.mediaType,
       id: state.id,
@@ -782,7 +863,11 @@ function startFallbackProgress() {
       poster: state.item?.poster || posterById(state.id, state.mediaType) || ""
     };
     localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
-  }, 15000);
+    if (el.sideProgress) {
+      el.sideProgress.textContent = `Resume: ${formatSeconds(timestamp)} (${Math.round(progress)}%)`;
+    }
+    queueAutoSync();
+  }, 5000);
 }
 
 function stopFallbackProgress() {
@@ -830,19 +915,25 @@ function buildPlayerUrl(serverId) {
     } else {
       url.searchParams.set("autoplay", "0");
     }
+    if (state.resumeTarget > 0) {
+      url.searchParams.set("start", String(Math.floor(state.resumeTarget)));
+      url.searchParams.set("progress", String(Math.floor(state.resumeTarget)));
+    }
     return url;
   }
 
   const baseUrl = state.mediaType === "movie"
-    ? `${PLAYER_BASE}/movie/${state.id}`
-    : `${PLAYER_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
+    ? `${PLAYER_BASE}/embed/movie/${state.id}`
+    : `${PLAYER_BASE}/embed/tv/${state.id}/${state.season}/${state.episode}`;
   const url = new URL(baseUrl);
   if (state.settings.autoPlay || state.resumeMode) {
     url.searchParams.set("autoPlay", "true");
   }
-  if (state.mediaType === "tv") {
+  if (state.settings.nextEpisode && state.mediaType === "tv") {
     url.searchParams.set("nextEpisode", "true");
-    url.searchParams.set("episodeSelector", "true");
+  }
+  if (state.resumeTarget > 0) {
+    url.searchParams.set("progress", String(Math.floor(state.resumeTarget)));
   }
   return url;
 }
@@ -851,7 +942,8 @@ function ensureProgressEntry() {
   if (!state.item) return;
   const key = `${state.mediaType}:${state.id}:${state.season}:${state.episode}`;
   const existing = state.progress[key];
-  if (existing && (Number(existing.progress || 0) > 0 || Number(existing.timestamp || 0) > 0)) return;
+  if (!existing) return;
+  if (Number(existing.progress || 0) > 0 || Number(existing.timestamp || 0) > 0) return;
 
   state.progress[key] = {
     mediaType: state.mediaType,
@@ -887,7 +979,7 @@ function renderWatchAccountUI() {
   if (!el.watchAccountBtn) return;
 
   if (state.session?.user) {
-    const avatarId = normalizeAvatarId(state.session.user.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "luffy"));
+    const avatarId = normalizeAvatarId(state.session.user.user_metadata?.avatarId || "none");
     if (el.watchAccountAvatar) {
       el.watchAccountAvatar.removeAttribute("hidden");
       setAccountAvatarImage(el.watchAccountAvatar, avatarId);
@@ -907,6 +999,26 @@ function renderWatchAccountUI() {
     closeWatchAccountMenu();
     if (el.watchListsLink) el.watchListsLink.setAttribute("hidden", "");
   }
+}
+
+function ensureWatchReportMenuItem() {
+  if (!el.watchAccountMenu || el.watchAccountMenu.querySelector("[data-open-report]")) return;
+  const button = document.createElement("button");
+  button.className = "account-menu-item";
+  button.type = "button";
+  button.dataset.openReport = "true";
+  button.innerHTML = `
+    <span class="menu-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M8 6l-2-2"/><path d="M16 6l2-2"/><path d="M9 9h6"/><path d="M8 13h8"/><path d="M9 17h6"/><rect x="7" y="6" width="10" height="14" rx="5"/><path d="M3 13h4"/><path d="M17 13h4"/></svg>
+    </span>
+    <span>Report</span>
+  `;
+  el.watchAccountMenu.insertBefore(button, el.watchSignOutBtn || null);
+  button.addEventListener("click", () => {
+    closeWatchAccountMenu();
+    el.reportMessage.value = "";
+    el.reportDialog.showModal();
+  });
 }
 
 function setAccountAvatarImage(image, avatarId) {
@@ -941,7 +1053,10 @@ async function syncProgressToCloud() {
   const session = await ensureSession();
   if (!session) return;
 
-  const rows = Object.values(state.progress).slice(-240).map((entry) => ({
+  const rows = dedupeProgressRows(Object.values(state.progress))
+    .filter((entry) => shouldSyncProgressEntry(entry))
+    .slice(-240)
+    .map((entry) => ({
     user_id: state.session.user.id,
     media_type: entry.mediaType,
     content_id: entry.id,
@@ -972,6 +1087,35 @@ async function syncProgressToCloud() {
   }
 
   state.lastSyncAt = Date.now();
+}
+
+function shouldSyncProgressEntry(entry) {
+  const progress = Number(entry?.progress || 0);
+  const timestamp = Number(entry?.timestamp || 0);
+  return progress >= 98 || timestamp > 8 || progress > 1;
+}
+
+function dedupeProgressRows(entries) {
+  const map = new Map();
+  (entries || []).forEach((entry) => {
+    const mediaType = entry?.mediaType === "tv" ? "tv" : "movie";
+    const id = Number(entry?.id || 0);
+    if (!id) return;
+    const season = mediaType === "tv" ? Number(entry?.season || 1) : 1;
+    const episode = mediaType === "tv" ? Number(entry?.episode || 1) : 1;
+    const key = `${mediaType}:${id}:${season}:${episode}`;
+    const previous = map.get(key);
+    if (!previous || Number(entry?.updatedAt || 0) >= Number(previous?.updatedAt || 0)) {
+      map.set(key, {
+        ...entry,
+        mediaType,
+        id,
+        season,
+        episode
+      });
+    }
+  });
+  return [...map.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 }
 
 function queueAutoSync(immediate = false) {
@@ -1007,6 +1151,12 @@ function labelForStatus(status) {
 
 function setStatus(message) {
   el.watchStatus.textContent = message;
+  const lowered = String(message || "").toLowerCase();
+  if (lowered.includes("saved") || lowered.includes("removed") || lowered.includes("submitted") || lowered.includes("updated")) {
+    showToast(message, "success");
+  } else if (lowered.includes("could not") || lowered.includes("missing") || lowered.includes("unavailable")) {
+    showToast(message, "error");
+  }
 }
 
 function readJson(key, fallback) {

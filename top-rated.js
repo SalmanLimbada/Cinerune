@@ -1,11 +1,13 @@
 import {
   initTmdb,
   fetchTopRatedPage
-} from "./catalog.js?v=20260501-fix1";
-import { initSharedHeader } from "./shared-ui.js?v=20260502-notifications1";
-import { initDragScroll } from "./drag-scroll.js?v=20260502-ui1";
+} from "./catalog.js?v=20260508-toggle1";
+import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
 
 const query = new URLSearchParams(window.location.search);
+const GRID_PAGE_SIZE = 24;
+const API_PAGE_SIZE = 20;
 let mediaType = query.get("type") === "tv" ? "tv" : "movie";
 let page = Math.max(1, Number(query.get("page") || 1));
 const cache = { movie: new Map(), tv: new Map() };
@@ -83,7 +85,7 @@ async function ensureTopRated(type, pageNumber) {
     await loading[type].get(pageNumber);
     return;
   }
-  const pending = fetchTopRatedPage(type, pageNumber)
+  const pending = fetchTopRatedGridPage(type, pageNumber)
     .then((result) => {
       cache[type].set(pageNumber, result.items || []);
       totals[type] = Math.max(1, Number(result.totalPages || 1));
@@ -97,6 +99,44 @@ async function ensureTopRated(type, pageNumber) {
     });
   loading[type].set(pageNumber, pending);
   await pending;
+}
+
+async function fetchTopRatedGridPage(type, pageNumber) {
+  const source = getSourcePageWindow(pageNumber);
+  const first = await fetchTopRatedPage(type, source.firstPage);
+  const totalSourcePages = Math.max(1, Number(first.totalPages || 1));
+  const responses = [first];
+
+  if (source.firstPage + 1 <= totalSourcePages) {
+    responses.push(await fetchTopRatedPage(type, source.firstPage + 1));
+  }
+
+  const items = dedupeMediaItems(responses.flatMap((entry) => entry.items || []))
+    .slice(source.offset, source.offset + GRID_PAGE_SIZE);
+
+  return {
+    items,
+    page: pageNumber,
+    totalPages: Math.max(1, Math.ceil((totalSourcePages * API_PAGE_SIZE) / GRID_PAGE_SIZE))
+  };
+}
+
+function getSourcePageWindow(pageNumber) {
+  const start = (Math.max(1, Number(pageNumber || 1)) - 1) * GRID_PAGE_SIZE;
+  return {
+    firstPage: Math.floor(start / API_PAGE_SIZE) + 1,
+    offset: start % API_PAGE_SIZE
+  };
+}
+
+function dedupeMediaItems(items) {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    const key = `${item.mediaType === "tv" ? "tv" : "movie"}:${Number(item.id || 0)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function renderFromCache(type, pageNumber) {
@@ -230,18 +270,23 @@ function renderPosterCards(items) {
   });
 
   el.topRatedGrid.appendChild(fragment);
+  balancePosterGrid(el.topRatedGrid);
   initDragScroll();
 }
 
 function setPosterImage(image, item) {
   const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = "eager";
+  image.loading = "lazy";
   image.decoding = "async";
+  image.onload = () => image.classList.add("is-loaded");
   image.onerror = () => {
     image.onerror = null;
+    image.onload = null;
+    image.classList.add("is-loaded");
     image.src = fallback;
   };
   image.src = item?.poster || fallback;
+  if (!item?.poster) image.classList.add("is-loaded");
 }
 
 function buildPosterPlaceholder(title) {
