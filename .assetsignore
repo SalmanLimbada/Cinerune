@@ -10,5 +10,3 @@ worker
 worker/**
 README.md
 wrangler.toml
-config.local.js
-config.local.example.js
