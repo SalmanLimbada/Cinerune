@@ -1,5 +1,8 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession, setStoredSession } from "./auth-client.js";
 import { initHeaderNotifications } from "./notifications.js?v=20260508-toggle1";
+import { searchCatalog } from "./catalog.js?v=20260508-toggle1";
+import { initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
+import { buildWatchHref, debounce, escapeHtml, readJson, sanitizeText } from "./shared-utils.js?v=20260508-toggle1";
 import { showToast } from "./ui-toast.js";
 
 const avatarOptions = [
@@ -25,11 +28,13 @@ export function initSharedHeader() {
   sharedHeaderRefs.label = label;
 
   ensureAccountMenuIcons(accountMenu);
-  ensureReportMenuItem(accountMenu, () => currentSession);
+  ensureSharedReportMenuItem(accountMenu, () => currentSession);
   bindSettingsMenu(accountMenu, () => currentSession);
   const headerActions = ensureHeaderActionsGroup();
   const bookmarksLink = ensureBookmarksLink(headerActions || notificationsWrap || accountWrap);
 
+  initSharedNavSearch();
+  initSharedFooterReport(() => currentSession);
   renderSharedAccount(avatar, label, null);
   updateBookmarksLink(bookmarksLink, null);
 
@@ -549,8 +554,8 @@ async function openSharedSettingsModal(initialPanelName) {
   if (settingsModalState.deleteConfirm) settingsModalState.deleteConfirm.value = "";
   updateSharedEmailSettingsLabels(session);
   if (settingsModalState.authUserEmail) {
-    settingsModalState.authUserEmail.textContent = displayEmail(session.user.email)
-      || meta.username
+    settingsModalState.authUserEmail.textContent = meta.username
+      || displayEmail(session.user.email)
       || "Account";
   }
   if (settingsModalState.accountAvatar) {
@@ -989,12 +994,6 @@ function isValidPassword(value) {
   return typeof value === "string" && value.length >= 6 && value.length <= 128;
 }
 
-function sanitizeText(value, maxLen) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return "";
-  return trimmed.slice(0, maxLen);
-}
-
 function cssEscape(value) {
   return String(value || "").replaceAll('"', "\\\"");
 }
@@ -1023,7 +1022,7 @@ function ensureAccountMenuIcons(menu) {
   });
 }
 
-function ensureReportMenuItem(menu, getSession) {
+export function ensureSharedReportMenuItem(menu, getSession) {
   if (!menu || menu.querySelector("[data-open-report]")) return;
   const button = document.createElement("button");
   button.className = "account-menu-item";
@@ -1039,11 +1038,36 @@ function ensureReportMenuItem(menu, getSession) {
   menu.insertBefore(button, signOut || null);
   button.addEventListener("click", () => {
     menu.setAttribute("hidden", "");
+    const accountButton = menu.closest(".account-menu-wrap")?.querySelector("button");
+    accountButton?.classList.remove("active");
+    accountButton?.setAttribute("aria-expanded", "false");
     openSharedReportDialog(getSession?.() || null);
   });
 }
 
-function openSharedReportDialog(session) {
+const sharedReportState = {
+  session: null
+};
+
+export function initSharedFooterReport(getSession) {
+  const notice = document.querySelector(".site-notice");
+  if (!notice || notice.querySelector("[data-footer-report]")) return;
+  const button = document.createElement("button");
+  button.className = "notice-report-btn";
+  button.type = "button";
+  button.dataset.footerReport = "true";
+  button.innerHTML = `
+    <span class="control-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M8 6l-2-2"/><path d="M16 6l2-2"/><path d="M9 9h6"/><path d="M8 13h8"/><path d="M9 17h6"/><rect x="7" y="6" width="10" height="14" rx="5"/><path d="M3 13h4"/><path d="M17 13h4"/></svg>
+    </span>
+    <span>Report</span>
+  `;
+  notice.appendChild(button);
+  button.addEventListener("click", () => openSharedReportDialog(getSession?.() || null));
+}
+
+export function openSharedReportDialog(session) {
+  sharedReportState.session = session || null;
   let dialog = document.getElementById("sharedReportDialog");
   if (!dialog) {
     dialog = document.createElement("dialog");
@@ -1068,6 +1092,7 @@ function openSharedReportDialog(session) {
       const message = sanitizeText(input?.value || "", 500);
       if (input && input.value !== message) input.value = message;
       if (!message) {
+        animateFieldValidation(input);
         setSharedSettingsHint("Write a report message first.");
         return;
       }
@@ -1075,7 +1100,7 @@ function openSharedReportDialog(session) {
         page: window.location.pathname,
         message,
         createdAt: Date.now(),
-        userId: session?.user?.id || ""
+        userId: sharedReportState.session?.user?.id || ""
       };
       saveSharedLocalReport(report);
       void submitSharedReportToServer(report);
@@ -1086,6 +1111,14 @@ function openSharedReportDialog(session) {
   const textarea = dialog.querySelector("#sharedReportMessage");
   if (textarea) textarea.value = "";
   dialog.showModal();
+}
+
+function animateFieldValidation(input) {
+  if (!input) return;
+  input.classList.remove("field-shake");
+  void input.offsetWidth;
+  input.classList.add("field-shake");
+  input.focus();
 }
 
 function saveSharedLocalReport(report) {
@@ -1147,7 +1180,7 @@ function updateBookmarksLink(link, session) {
   }
 }
 
-function renderSharedAccount(avatarEl, labelEl, session) {
+export function renderSharedAccount(avatarEl, labelEl, session) {
   const signedIn = Boolean(session?.user);
   const avatarId = normalizeAvatarId(session?.user?.user_metadata?.avatarId || readJson("cinerune:avatar-choice", "none"));
   if (avatarEl) {
@@ -1167,8 +1200,87 @@ function renderSharedAccount(avatarEl, labelEl, session) {
     }
   }
   if (labelEl) {
-    labelEl.textContent = signedIn ? "Account" : "Login";
+    labelEl.textContent = signedIn
+      ? (session.user.user_metadata?.username || "Account")
+      : "Login";
   }
+}
+
+export function initSharedNavSearch(options = {}) {
+  const form = document.querySelector(".nav-search");
+  const input = form?.querySelector(".nav-search-input");
+  if (!form || !input || form.dataset.sharedSearchReady === "1") return;
+  form.dataset.sharedSearchReady = "1";
+  initConfiguredTmdb();
+
+  let suggestions = form.querySelector(".search-suggestions");
+  if (!suggestions) {
+    suggestions = document.createElement("div");
+    suggestions.className = "search-suggestions nav-search-suggestions";
+    suggestions.setAttribute("hidden", "");
+    form.appendChild(suggestions);
+  }
+
+  input.addEventListener("input", debounce(async () => {
+    const term = sanitizeText(input.value, 80);
+    if (input.value !== term) input.value = term;
+    if (!term) {
+      hideSharedSearchSuggestions(suggestions);
+      options.onClear?.();
+      return;
+    }
+    try {
+      const result = await searchCatalog(term, { page: 1 });
+      renderSharedSearchSuggestions(suggestions, result.all || [...(result.movies || []), ...(result.tv || [])]);
+      options.onResults?.(result, term);
+    } catch {
+      hideSharedSearchSuggestions(suggestions);
+      options.onError?.();
+    }
+  }, 280));
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    const term = sanitizeText(input.value, 80);
+    if (!term) {
+      event.preventDefault();
+      hideSharedSearchSuggestions(suggestions);
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (form.contains(event.target)) return;
+    hideSharedSearchSuggestions(suggestions);
+  });
+}
+
+function renderSharedSearchSuggestions(container, items) {
+  const top = (items || []).slice(0, 8);
+  if (!top.length) {
+    hideSharedSearchSuggestions(container);
+    return;
+  }
+
+  container.innerHTML = top.map((item, index) => {
+    const type = item.mediaType === "movie" ? "Movie" : "TV";
+    const subtitle = [type, item.year].filter(Boolean).join(" | ");
+    return `
+      <a class="search-suggestion" href="${escapeHtml(buildWatchHref(item.id, item.mediaType))}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.mediaType)}" style="animation-delay:${index * 35}ms">
+        <img class="search-suggestion-poster" src="${escapeHtml(item.poster || "")}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" />
+        <span>
+          <span class="search-suggestion-title">${escapeHtml(item.title)}</span>
+          <span class="search-suggestion-sub">${escapeHtml(subtitle)}</span>
+        </span>
+      </a>
+    `;
+  }).join("");
+  container.removeAttribute("hidden");
+}
+
+function hideSharedSearchSuggestions(container) {
+  if (!container) return;
+  container.setAttribute("hidden", "");
+  container.innerHTML = "";
 }
 
 export function normalizeAvatarId(value) {
@@ -1250,22 +1362,4 @@ function avatarAccessorySvg(accessory, accent, eyes) {
   if (accessory === "earring") return `<circle cx="34" cy="64" r="4" fill="${accent}" /><circle cx="94" cy="64" r="4" fill="${accent}" />`;
   if (accessory === "star") return `<path d="M 82 32 L 84 38 L 90 38 L 85 42 L 87 48 L 82 44 L 77 48 L 79 42 L 74 38 L 80 38 Z" fill="${accent}" />`;
   return "";
-}
-
-function readJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

@@ -1,9 +1,8 @@
 import { ensureSession } from "./auth-client.js";
-import { initTmdb, fetchItemDetailsById } from "./catalog.js?v=20260508-toggle1";
+import { fetchItemDetailsById } from "./catalog.js?v=20260508-toggle1";
+import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
+import { buildWatchHref, escapeHtml, readJson } from "./shared-utils.js?v=20260508-toggle1";
 
-const progressBaseKey = "cinerune:progress";
-const bookmarksBaseKey = "cinerune:bookmarks";
-const notificationReadBaseKey = "cinerune:notification-read";
 const NEW_EPISODE_WINDOW_DAYS = 14;
 
 let catalogReady = false;
@@ -155,7 +154,7 @@ async function buildEpisodeNotification(entry, progress) {
     airDate: latestAirDate,
     episodeName: item?.latestEpisodeName || "",
     sortAt: Date.parse(latestAirDate) || Date.now(),
-    href: buildWatchHref(id, latestSeason, latestEpisode)
+    href: buildWatchHref(id, "tv", latestSeason, latestEpisode)
   };
   notification.readId = buildNotificationReadId(notification);
   return notification;
@@ -247,11 +246,7 @@ function getLatestWatchedEpisode(progress, showId) {
 function setupCatalog() {
   if (catalogReady) return;
   catalogReady = true;
-  initTmdb({
-    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
-    fallbackApiBase: String(window.CINERUNE_CONFIG?.fallbackApiBase || "").trim(),
-    language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
-  });
+  initConfiguredTmdb();
 }
 
 function closeAccountMenu() {
@@ -259,30 +254,6 @@ function closeAccountMenu() {
   const accountBtn = document.getElementById("toggleAuth");
   accountMenu?.setAttribute("hidden", "");
   accountBtn?.classList.remove("active");
-}
-
-function buildWatchHref(id, season, episode) {
-  const url = new URL("./watch.html", window.location.href);
-  url.searchParams.set("id", String(id));
-  url.searchParams.set("type", "tv");
-  url.searchParams.set("s", String(season || 1));
-  url.searchParams.set("e", String(episode || 1));
-  return url.toString();
-}
-
-function getBookmarksKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${bookmarksBaseKey}:user:${userId}` : `${bookmarksBaseKey}:guest`;
-}
-
-function getProgressKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
-}
-
-function getNotificationReadKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${notificationReadBaseKey}:user:${userId}` : `${notificationReadBaseKey}:guest`;
 }
 
 function buildNotificationReadId(item) {
@@ -321,22 +292,4 @@ function formatTimeAgo(value) {
   if (diffDays < 30) return `${diffDays}d ago`;
   const diffMonths = Math.floor(diffDays / 30);
   return `${diffMonths}mo ago`;
-}
-
-function readJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

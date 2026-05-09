@@ -1,10 +1,9 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession } from "./auth-client.js";
-import { avatarDataUri, avatarSrcById, normalizeAvatarId, openSettingsModal, openSharedAuthModal } from "./shared-ui.js?v=20260508-toggle1";
+import { avatarDataUri, avatarSrcById, initSharedFooterReport, initSharedNavSearch, normalizeAvatarId, openSettingsModal, openSharedAuthModal } from "./shared-ui.js?v=20260508-toggle1";
 import { initHeaderNotifications } from "./notifications.js?v=20260508-toggle1";
 import { initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
 import { showToast } from "./ui-toast.js";
 import {
-  initTmdb,
   fetchItemDetailsById,
   fetchRelatedById,
   episodeCount,
@@ -13,25 +12,14 @@ import {
   titleById,
   posterById
 } from "./catalog.js?v=20260508-toggle1";
+import { getBookmarksKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260508-toggle1";
+import { buildWatchHref, escapeHtml, formatSeconds, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
 
 const PLAYER_BASE = "https://www.vidking.net";
 const VIDSRC_BASE = "https://vidsrc-embed.ru/embed";
 const settingsKey = "cinerune:settings";
-const legacyProgressKey = "cinerune:progress";
-const progressBaseKey = "cinerune:progress";
-const bookmarksBaseKey = "cinerune:bookmarks";
 const reportsKey = "cinerune:reports";
 const REPORT_LIMIT = 500;
-
-function getBookmarksKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${bookmarksBaseKey}:user:${userId}` : `${bookmarksBaseKey}:guest`;
-}
-
-function getProgressKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
-}
 
 const el = {
   watchAccountMenuWrap: document.getElementById("watchAccountMenuWrap"),
@@ -117,11 +105,9 @@ boot();
 
 async function boot() {
   syncProgressState();
-  initTmdb({
-    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
-    fallbackApiBase: String(window.CINERUNE_CONFIG?.fallbackApiBase || "").trim(),
-    language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
-  });
+  initConfiguredTmdb();
+  initSharedNavSearch();
+  initSharedFooterReport(() => state.session);
 
 
   bindEvents();
@@ -235,10 +221,7 @@ function bindEvents() {
     }
   });
 
-  el.reportTrigger.addEventListener("click", () => {
-    el.reportMessage.value = "";
-    el.reportDialog.showModal();
-  });
+  el.reportTrigger.addEventListener("click", openReportDialog);
 
   el.playerFrame?.addEventListener("load", () => {
     state.playerLoadedAt = Date.now();
@@ -562,14 +545,7 @@ async function renderRelated() {
     meta.append(title, sub);
     link.append(image, badge, meta);
 
-    const url = new URL("./watch.html", window.location.href);
-    url.searchParams.set("id", String(item.id));
-    url.searchParams.set("type", item.mediaType);
-    if (item.mediaType === "tv") {
-      url.searchParams.set("s", "1");
-      url.searchParams.set("e", "1");
-    }
-    link.href = url.toString();
+    link.href = buildWatchHref(item.id, item.mediaType);
 
     card.appendChild(link);
     fragment.appendChild(card);
@@ -578,28 +554,6 @@ async function renderRelated() {
   el.relatedRail.innerHTML = "";
   el.relatedRail.appendChild(fragment);
   initDragScroll();
-}
-
-function setPosterImage(image, item) {
-  if (!image) return;
-  const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = "lazy";
-  image.decoding = "async";
-  image.onload = () => image.classList.add("is-loaded");
-  image.onerror = () => {
-    image.onerror = null;
-    image.onload = null;
-    image.classList.add("is-loaded");
-    image.src = fallback;
-  };
-  image.src = item?.poster || fallback;
-  if (!item?.poster) image.classList.add("is-loaded");
-}
-
-function buildPosterPlaceholder(title) {
-  const safeTitle = escapeHtml(String(title || "Cinerune").slice(0, 28));
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#123a5c"/><stop offset="100%" stop-color="#071528"/></linearGradient></defs><rect width="300" height="450" fill="url(#g)"/><rect x="22" y="22" width="256" height="406" rx="18" fill="rgba(255,255,255,0.045)" stroke="rgba(126,216,255,0.18)"/><text x="150" y="214" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="20" font-weight="700" text-anchor="middle">${safeTitle}</text><text x="150" y="246" fill="#9fb6d0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">Poster loading unavailable</text></svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 function saveBookmark(status) {
@@ -639,6 +593,7 @@ function submitReport() {
     el.reportMessage.value = message;
   }
   if (!message) {
+    animateReportValidation();
     setStatus("Write a report message first.");
     return;
   }
@@ -661,6 +616,20 @@ function submitReport() {
   setStatus("Report submitted. Thank you.");
 }
 
+function openReportDialog() {
+  el.reportMessage.value = "";
+  el.reportMessage.classList.remove("field-shake");
+  el.reportDialog.showModal();
+}
+
+function animateReportValidation() {
+  if (!el.reportMessage) return;
+  el.reportMessage.classList.remove("field-shake");
+  void el.reportMessage.offsetWidth;
+  el.reportMessage.classList.add("field-shake");
+  el.reportMessage.focus();
+}
+
 async function submitReportToServer(report) {
   try {
     const session = await ensureSession();
@@ -672,12 +641,6 @@ async function submitReportToServer(report) {
   } catch {
     // Local report storage is the fallback if the reports table is not configured.
   }
-}
-
-function sanitizeText(value, maxLen) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return "";
-  return trimmed.slice(0, maxLen);
 }
 
 function getSavedProgress() {
@@ -1016,8 +979,7 @@ function ensureWatchReportMenuItem() {
   el.watchAccountMenu.insertBefore(button, el.watchSignOutBtn || null);
   button.addEventListener("click", () => {
     closeWatchAccountMenu();
-    el.reportMessage.value = "";
-    el.reportDialog.showModal();
+    openReportDialog();
   });
 }
 
@@ -1157,31 +1119,4 @@ function setStatus(message) {
   } else if (lowered.includes("could not") || lowered.includes("missing") || lowered.includes("unavailable")) {
     showToast(message, "error");
   }
-}
-
-function readJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function formatSeconds(value) {
-  const total = Math.max(0, Math.floor(Number(value || 0)));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
 }

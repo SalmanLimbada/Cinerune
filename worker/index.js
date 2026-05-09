@@ -613,10 +613,6 @@ async function handleReportSubmit(request, env) {
 
   const row = {
     user_id: userId || null,
-    page: String(payload?.page || "").slice(0, 200),
-    media_type: String(payload?.mediaType || "").slice(0, 20) || null,
-    content_id: Number(payload?.contentId || 0) || null,
-    title: String(payload?.title || "").slice(0, 200) || null,
     message,
     created_at: new Date().toISOString()
   };

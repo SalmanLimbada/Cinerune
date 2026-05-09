@@ -1,10 +1,11 @@
 import { apiRequest, authHeaders, ensureSession, getStoredSession, setStoredSession, clearStoredSession } from "./auth-client.js";
-import { openSettingsModal } from "./shared-ui.js?v=20260508-toggle1";
+import { ensureSharedReportMenuItem, initSharedFooterReport, initSharedNavSearch, openSettingsModal, renderSharedAccount } from "./shared-ui.js?v=20260508-toggle1";
 import { showToast } from "./ui-toast.js";
 import * as catalogApi from "./catalog.js?v=20260508-toggle1";
 import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
+import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260508-toggle1";
+import { buildWatchHref, escapeHtml, formatSeconds, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
 
-const initTmdb = catalogApi.initTmdb;
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
 const fetchGenreOptions = catalogApi.fetchGenreOptions || (async () => ({ movie: [], tv: [] }));
 const fetchCountryOptions = catalogApi.fetchCountryOptions || (async () => []);
@@ -16,10 +17,6 @@ const fetchRecommendedFromHistory = catalogApi.fetchRecommendedFromHistory || (a
 const fetchItemDetailsById = catalogApi.fetchItemDetailsById;
 const isSensitiveCatalogItem = catalogApi.isSensitiveCatalogItem || (() => false);
 
-const legacyProgressKey = "cinerune:progress";
-const progressBaseKey = "cinerune:progress";
-const bookmarksBaseKey = "cinerune:bookmarks";
-const notificationReadBaseKey = "cinerune:notification-read";
 const homeCacheKey = "cinerune:home-cache";
 const NEW_EPISODE_WINDOW_DAYS = 14;
 const INPUT_LIMITS = {
@@ -125,7 +122,6 @@ const el = {
   popularGrid: document.getElementById("popularGrid"),
   popularPrevBtn: document.getElementById("popularPrevBtn"),
   popularNextBtn: document.getElementById("popularNextBtn"),
-  searchSuggestions: document.getElementById("searchSuggestions"),
   navSearchBtn: document.getElementById("navSearchBtn"),
   navSearchInput: document.getElementById("navSearchInput"),
   navSearchForm: document.getElementById("navSearchForm"),
@@ -160,21 +156,6 @@ const state = {
   passwordRecoveryMode: false
 };
 
-function getBookmarksKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${bookmarksBaseKey}:user:${userId}` : `${bookmarksBaseKey}:guest`;
-}
-
-function getProgressKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
-}
-
-function getNotificationReadKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${notificationReadBaseKey}:user:${userId}` : `${notificationReadBaseKey}:guest`;
-}
-
 let selectedAvatarId = readJson("cinerune:avatar-choice", "none");
 let authModalMode = "login";
 let suppressLocalSessionUpdate = false;
@@ -192,13 +173,10 @@ boot();
 
 async function boot() {
   bindEvents();
+  initSharedFooterReport(() => state.session);
   syncProgressState();
 
-  initTmdb({
-    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
-    fallbackApiBase: String(window.CINERUNE_CONFIG?.fallbackApiBase || "").trim(),
-    language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
-  });
+  initConfiguredTmdb();
 
   await initAuth();
   if (startupAuthCallback) {
@@ -291,7 +269,7 @@ function bindEvents() {
       openSettingsModal();
     });
   }
-  ensureReportMenuItem(el.accountMenu);
+  ensureSharedReportMenuItem(el.accountMenu, () => state.session);
 
   if (el.authIdentifier) {
     el.authIdentifier.addEventListener("keydown", onAuthEnter);
@@ -327,33 +305,22 @@ function bindEvents() {
   }
 
   if (el.navSearchInput) {
-    el.navSearchInput.addEventListener("input", debounce(async () => {
-      state.searchTerm = sanitizeText(el.navSearchInput.value, INPUT_LIMITS.searchMax);
-      if (el.navSearchInput.value !== state.searchTerm) {
-        el.navSearchInput.value = state.searchTerm;
-      }
-      if (!state.searchTerm) {
+    initSharedNavSearch({
+      onClear: () => {
         state.searchResults = [];
-        hideSearchSuggestions();
         hideSearchResults();
-        return;
-      }
-
-      try {
+      },
+      onResults: (result, term) => {
+        state.searchTerm = term;
         state.searchPage = 1;
-        const result = await searchCatalog(state.searchTerm, { page: state.searchPage });
         const merged = (result.all || [...result.movies, ...result.tv]).slice(0, 24);
         state.searchResults = merged;
         state.searchTotalPages = Math.max(1, Number(result.totalPages || 1));
         renderSearchResults(merged);
         renderSearchPagination();
-        renderSearchSuggestions(state.searchResults);
-      } catch {
-        hideSearchSuggestions();
-        hideSearchResults();
-      }
-    }, 280));
-
+      },
+      onError: hideSearchResults
+    });
     el.navSearchInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -370,9 +337,6 @@ function bindEvents() {
     if (el.notificationsWrap && !el.notificationsWrap.contains(event.target)) {
       closeNotificationsMenu();
     }
-    if (!el.navSearchInput || !el.searchSuggestions) return;
-    if (event.target === el.navSearchInput || el.searchSuggestions.contains(event.target)) return;
-    hideSearchSuggestions();
   });
 
   document.addEventListener("click", (event) => {
@@ -1038,20 +1002,6 @@ function updateContinueWatchingLink(entry) {
   el.continueWatchingLink.href = "./lists.html?view=continue";
 }
 
-function buildWatchHref(id, mediaType, season, episode, resume = false) {
-  const url = new URL("./watch.html", window.location.href);
-  url.searchParams.set("id", String(id));
-  url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
-  if (mediaType === "tv") {
-    url.searchParams.set("s", String(season || 1));
-    url.searchParams.set("e", String(episode || 1));
-  }
-  if (resume) {
-    url.searchParams.set("resume", "1");
-  }
-  return url.toString();
-}
-
 function syncBookmarksState() {
   state.bookmarks = readJson(getBookmarksKey(state.session), {});
 }
@@ -1128,7 +1078,7 @@ function renderAuthUI() {
     selectedAvatarId = avatarId;
     renderAvatarPickers();
     renderActiveAvatar(avatarId);
-    renderAccountButton(avatarId, "Account");
+    renderAccountButton(avatarId, user.user_metadata?.username || "Account");
     el.homeListsLink?.removeAttribute("hidden");
     if (el.toggleAuth) el.toggleAuth.title = "Open account menu";
     const authTitle = el.authModal?.querySelector("#authTitle");
@@ -1678,90 +1628,6 @@ function applyUpdatedUser(user, metadataPatch = {}) {
   renderAuthUI();
 }
 
-function ensureReportMenuItem(menu) {
-  if (!menu || menu.querySelector("[data-open-report]")) return;
-  const button = document.createElement("button");
-  button.className = "account-menu-item";
-  button.type = "button";
-  button.dataset.openReport = "true";
-  button.innerHTML = `
-    <span class="menu-icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24"><path d="M8 6l-2-2"/><path d="M16 6l2-2"/><path d="M9 9h6"/><path d="M8 13h8"/><path d="M9 17h6"/><rect x="7" y="6" width="10" height="14" rx="5"/><path d="M3 13h4"/><path d="M17 13h4"/></svg>
-    </span>
-    <span>Report</span>
-  `;
-  const signOut = menu.querySelector("#signOutMenuBtn, .destructive");
-  menu.insertBefore(button, signOut || null);
-  button.addEventListener("click", () => {
-    closeAccountMenu();
-    openReportDialog();
-  });
-}
-
-function openReportDialog() {
-  let dialog = document.getElementById("globalReportDialog");
-  if (!dialog) {
-    dialog = document.createElement("dialog");
-    dialog.id = "globalReportDialog";
-    dialog.className = "report-dialog";
-    dialog.innerHTML = `
-      <form id="globalReportForm" method="dialog">
-        <h3>Send Report</h3>
-        <p class="tiny muted">Report a bug, request a movie, or request a show.</p>
-        <textarea id="globalReportMessage" rows="4" placeholder="Write your report or request"></textarea>
-        <div class="account-actions">
-          <button id="globalReportCancel" class="pill-btn ghost" value="cancel" type="button">Cancel</button>
-          <button class="pill-btn" value="submit" type="submit">Send Report</button>
-        </div>
-      </form>
-    `;
-    document.body.appendChild(dialog);
-    dialog.querySelector("#globalReportCancel")?.addEventListener("click", () => dialog.close("cancel"));
-    dialog.querySelector("#globalReportForm")?.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const input = dialog.querySelector("#globalReportMessage");
-      const message = sanitizeText(input?.value || "", 500);
-      if (input && input.value !== message) input.value = message;
-      if (!message) {
-        setAuthHint("Write a report message first.");
-        return;
-      }
-      const report = {
-        page: window.location.pathname,
-        message,
-        createdAt: Date.now(),
-        userId: state.session?.user?.id || ""
-      };
-      saveLocalReport(report);
-      void submitReportToServer(report);
-      dialog.close("submit");
-      setAuthHint("Report saved.");
-    });
-  }
-  const textarea = dialog.querySelector("#globalReportMessage");
-  if (textarea) textarea.value = "";
-  dialog.showModal();
-}
-
-function saveLocalReport(report) {
-  const reports = readJson("cinerune:reports", []);
-  reports.unshift(report);
-  localStorage.setItem("cinerune:reports", JSON.stringify(reports.slice(0, 200)));
-}
-
-async function submitReportToServer(report) {
-  try {
-    const session = await ensureSession();
-    await apiRequest("/report", {
-      method: "POST",
-      headers: authHeaders(session),
-      body: report
-    });
-  } catch {
-    // The local copy above is the fallback if the reports table is not configured.
-  }
-}
-
 async function hydrateSessionFromHash() {
   const accessToken = startupHash.get("access_token");
   const refreshToken = startupHash.get("refresh_token");
@@ -1818,12 +1684,6 @@ function onAuthEnter(event) {
   } else {
     signIn();
   }
-}
-
-function sanitizeText(value, maxLen) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return "";
-  return trimmed.slice(0, maxLen);
 }
 
 function normalizeIdentifier(value) {
@@ -1899,26 +1759,17 @@ function renderActiveAvatar(avatarId) {
 }
 
 function renderAccountButton(avatarId, label) {
-  const showAvatar = label !== "Login";
-  const avatar = avatarOptions.find((option) => option.id === normalizeAvatarId(avatarId)) || avatarOptions[0];
-  if (el.authAvatarThumb) {
-    el.authAvatarThumb.toggleAttribute("hidden", !showAvatar);
-    if (showAvatar) {
-      el.authAvatarThumb.referrerPolicy = "no-referrer";
-      el.authAvatarThumb.onerror = () => {
-        el.authAvatarThumb.onerror = null;
-        el.authAvatarThumb.src = avatarDataUri(avatar);
+  const session = label === "Login"
+    ? null
+    : {
+        user: {
+          user_metadata: {
+            avatarId: normalizeAvatarId(avatarId),
+            username: label
+          }
+        }
       };
-      el.authAvatarThumb.src = avatarImageSrc(avatar);
-      el.authAvatarThumb.alt = `${avatar.label} avatar`;
-    } else {
-      el.authAvatarThumb.removeAttribute("src");
-      el.authAvatarThumb.alt = "";
-    }
-  }
-  if (el.authButtonLabel) {
-    el.authButtonLabel.textContent = label;
-  }
+  renderSharedAccount(el.authAvatarThumb, el.authButtonLabel, session);
 }
 
 function avatarImageSrc(avatar) {
@@ -2117,41 +1968,6 @@ async function pullCloudProgress() {
   localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
   await hydrateContinueRow();
   await refreshPersonalizedCollections();
-}
-
-function renderSearchSuggestions(items) {
-  if (!el.searchSuggestions) return;
-  const top = (items || []).slice(0, 8);
-  if (!top.length) {
-    hideSearchSuggestions();
-    return;
-  }
-
-  el.searchSuggestions.innerHTML = top.map((item, index) => {
-    const type = item.mediaType === "movie" ? "Movie" : "TV";
-    const subtitle = [type, item.year]
-      .filter(Boolean)
-      .join(" | ");
-    const poster = item.poster || "";
-    const href = buildWatchHref(item.id, item.mediaType, 1, 1);
-    return `
-      <a class="search-suggestion" href="${escapeHtml(href)}" data-id="${item.id}" data-type="${item.mediaType}" style="animation-delay:${index * 35}ms">
-        <img class="search-suggestion-poster" src="${escapeHtml(poster)}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" />
-        <span>
-          <span class="search-suggestion-title">${escapeHtml(item.title)}</span>
-          <span class="search-suggestion-sub">${escapeHtml(subtitle)}</span>
-        </span>
-      </a>
-    `;
-  }).join("");
-
-  el.searchSuggestions.removeAttribute("hidden");
-}
-
-function hideSearchSuggestions() {
-  if (!el.searchSuggestions) return;
-  el.searchSuggestions.setAttribute("hidden", "");
-  el.searchSuggestions.innerHTML = "";
 }
 
 function renderSearchResults(items) {
@@ -2357,41 +2173,6 @@ function formatShortDate(value) {
   }).format(new Date(parsed));
 }
 
-function setPosterImage(image, item, options = {}) {
-  if (!image) return;
-  const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = options.eager ? "eager" : "lazy";
-  image.decoding = "async";
-  if (options.eager) image.fetchPriority = "high";
-  image.onload = () => image.classList.add("is-loaded");
-  image.onerror = () => {
-    image.onerror = null;
-    image.onload = null;
-    image.classList.add("is-loaded");
-    image.src = fallback;
-  };
-  image.src = item?.poster || fallback;
-  if (!item?.poster) image.classList.add("is-loaded");
-}
-
-function buildPosterPlaceholder(title) {
-  const safeTitle = escapeHtml(String(title || "Cinerune").slice(0, 28));
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
-      <defs>
-        <linearGradient id="poster-bg" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stop-color="#123a5c" />
-          <stop offset="100%" stop-color="#071528" />
-        </linearGradient>
-      </defs>
-      <rect width="300" height="450" fill="url(#poster-bg)" />
-      <rect x="22" y="22" width="256" height="406" rx="18" fill="rgba(255,255,255,0.045)" stroke="rgba(126,216,255,0.18)" />
-      <text x="150" y="214" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="20" font-weight="700" text-anchor="middle">${safeTitle}</text>
-      <text x="150" y="246" fill="#9fb6d0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">Poster loading unavailable</text>
-    </svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
 function formatTimeAgo(value) {
   const parsed = Date.parse(`${String(value || "").trim()}T00:00:00`);
   if (!Number.isFinite(parsed)) return "";
@@ -2402,41 +2183,6 @@ function formatTimeAgo(value) {
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
-}
-
-function debounce(fn, wait) {
-  let timer = null;
-  return (...args) => {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => fn(...args), wait);
-  };
-}
-
-function formatSeconds(value) {
-  const total = Math.max(0, Math.floor(Number(value || 0)));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function readJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }
 
 function registerServiceWorker() {

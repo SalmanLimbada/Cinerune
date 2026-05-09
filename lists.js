@@ -1,5 +1,4 @@
 import {
-  initTmdb,
   fetchItemsByIds,
   titleById,
   posterById,
@@ -8,16 +7,10 @@ import {
 import { ensureSession } from "./auth-client.js";
 import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
 import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
+import { getBookmarksKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260508-toggle1";
+import { buildWatchHref, formatSeconds, readJson, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
 
-const bookmarksBaseKey = "cinerune:bookmarks";
-const progressBaseKey = "cinerune:progress";
-const legacyProgressKey = "cinerune:progress";
 const query = new URLSearchParams(window.location.search);
-
-function getBookmarksKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${bookmarksBaseKey}:user:${userId}` : `${bookmarksBaseKey}:guest`;
-}
 
 const el = {
   bookmarksStatus: document.getElementById("bookmarksStatus"),
@@ -39,11 +32,7 @@ boot();
 
 async function boot() {
   initSharedHeader();
-  initTmdb({
-    apiBase: String(window.CINERUNE_CONFIG?.apiBase || "").trim(),
-    fallbackApiBase: String(window.CINERUNE_CONFIG?.fallbackApiBase || "").trim(),
-    language: String(window.CINERUNE_CONFIG?.tmdbLanguage || "en-US").trim()
-  });
+  initConfiguredTmdb();
 
 
   await initAuth();
@@ -239,28 +228,6 @@ function removeBookmarkEntry(mediaType, id) {
   void renderBookmarksPage();
 }
 
-function buildPosterPlaceholder(title) {
-  const safeTitle = String(title || "Title").slice(0, 24);
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
-      <defs>
-        <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stop-color="#1a3552" />
-          <stop offset="100%" stop-color="#0f1f33" />
-        </linearGradient>
-      </defs>
-      <rect width="300" height="450" fill="url(#g)" />
-      <rect x="20" y="20" width="260" height="410" rx="18" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)" />
-      <text x="150" y="220" fill="#d8e8f8" font-family="Outfit, sans-serif" font-size="20" font-weight="600" text-anchor="middle">
-        ${safeTitle}
-      </text>
-      <text x="150" y="250" fill="#9fb6d0" font-family="Outfit, sans-serif" font-size="12" text-anchor="middle">
-        No poster available
-      </text>
-    </svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
 function renderEmpty(container) {
   container.innerHTML = '<p class="tiny muted">Empty</p>';
 }
@@ -283,46 +250,7 @@ function renderContinueMeta(container, item) {
 }
 
 function openWatchPage(id, mediaType, season = 1, episode = 1, resume = false) {
-  const url = new URL("./watch.html", window.location.href);
-  url.searchParams.set("id", String(id));
-  url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
-  if (mediaType === "tv") {
-    url.searchParams.set("s", String(season || 1));
-    url.searchParams.set("e", String(episode || 1));
-  }
-  if (resume) {
-    url.searchParams.set("resume", "1");
-  }
-  window.location.href = url.toString();
-}
-
-function buildWatchHref(id, mediaType, season = 1, episode = 1, resume = false) {
-  const url = new URL("./watch.html", window.location.href);
-  url.searchParams.set("id", String(id));
-  url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
-  if (mediaType === "tv") {
-    url.searchParams.set("s", String(season || 1));
-    url.searchParams.set("e", String(episode || 1));
-  }
-  if (resume) {
-    url.searchParams.set("resume", "1");
-  }
-  return url.toString();
-}
-
-function setPosterImage(image, item) {
-  const fallback = buildPosterPlaceholder(item?.title);
-  image.loading = "lazy";
-  image.decoding = "async";
-  image.onload = () => image.classList.add("is-loaded");
-  image.onerror = () => {
-    image.onerror = null;
-    image.onload = null;
-    image.classList.add("is-loaded");
-    image.src = fallback;
-  };
-  image.src = item?.poster || fallback;
-  if (!item?.poster) image.classList.add("is-loaded");
+  window.location.href = buildWatchHref(id, mediaType, season, episode, resume);
 }
 
 function hideBookmarkSections() {
@@ -341,36 +269,4 @@ function dedupeContinueEntries(entries) {
     }
   });
   return [...map.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-}
-
-function getProgressKey(session) {
-  const userId = session?.user?.id ? String(session.user.id) : "";
-  return userId ? `${progressBaseKey}:user:${userId}` : `${progressBaseKey}:guest`;
-}
-
-function formatSeconds(value) {
-  const total = Math.max(0, Math.floor(Number(value || 0)));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function readJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

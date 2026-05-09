@@ -50,11 +50,13 @@ body {
   font-family: "Outfit", sans-serif;
   color: var(--ink);
   background: linear-gradient(180deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
+  overflow-x: hidden;
 }
 
 .home-body,
 .watch-body {
   position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
@@ -69,7 +71,8 @@ body {
 .watch-atmosphere {
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
+  pointer-events: none;
   background:
     radial-gradient(circle at 18% 8%, rgba(54, 112, 162, 0.3), transparent 34%),
     radial-gradient(circle at 84% 14%, rgba(132, 73, 121, 0.24), transparent 36%),
@@ -278,6 +281,14 @@ body {
 .pill-btn.ghost {
   background: rgba(12, 30, 50, 0.85);
   color: #d9e9fb;
+}
+
+.home-shell,
+.watch-shell,
+.lists-shell,
+.site-notice {
+  position: relative;
+  z-index: 1;
 }
 
 .home-shell,
@@ -740,6 +751,10 @@ body {
 }
 
 .segmented-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
   border-radius: 8px;
   padding: 0.42rem 0.95rem;
   font-size: 0.8rem;
@@ -750,6 +765,25 @@ body {
   border: 0;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.segmented-icon,
+.control-icon {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.segmented-icon svg,
+.control-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .segmented-btn:hover {
@@ -846,7 +880,6 @@ body {
 .account-grid input,
 .settings-section input,
 #reportMessage,
-#globalReportMessage,
 #sharedReportMessage {
   border: 1px solid rgba(145, 178, 205, 0.2);
   border-radius: 8px;
@@ -1708,6 +1741,7 @@ body {
 }
 
 .player-shell {
+  position: relative;
   aspect-ratio: 16 / 9;
   background: #000;
   touch-action: pan-y;
@@ -1717,6 +1751,7 @@ body {
   width: 100%;
   height: 100%;
   border: 0;
+  touch-action: pan-y;
 }
 
 .player-controls {
@@ -1753,6 +1788,10 @@ body {
 }
 
 .control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   border: 1px solid rgba(142, 176, 203, 0.2);
   border-radius: 6px;
   background: rgba(10, 27, 45, 0.9);
@@ -1815,6 +1854,9 @@ body {
 }
 
 .site-notice {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   flex-shrink: 0;
   margin-top: auto;
   padding: calc(var(--notice-gap) + 0.55rem) 1.4rem 0.8rem;
@@ -1824,7 +1866,7 @@ body {
   font-size: 1rem;
   font-weight: 800;
   letter-spacing: 0.04em;
-  text-align: center;
+  text-align: left;
   line-height: 1.5;
   border-radius: 0;
   border-top: 0;
@@ -1979,6 +2021,7 @@ body {
 
 .dropdown {
   position: relative;
+  min-width: 0;
 }
 
 .dropdown-menu {
@@ -2067,8 +2110,41 @@ body {
   margin: 0;
 }
 
+.field-shake {
+  animation: fieldShake 260ms ease;
+  border-color: rgba(255, 123, 123, 0.8) !important;
+  box-shadow: 0 0 0 3px rgba(255, 92, 92, 0.16);
+}
+
+@keyframes fieldShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
+}
+
+.notice-report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  border: 1px solid rgba(126, 216, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(10, 27, 45, 0.74);
+  color: #dff4ff;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 750;
+  padding: 0.32rem 0.66rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.notice-report-btn:hover {
+  background: rgba(126, 216, 255, 0.14);
+}
+
 #reportMessage,
-#globalReportMessage,
 #sharedReportMessage {
   width: 100%;
   min-width: 100%;
@@ -2278,14 +2354,8 @@ body {
   }
 
   .dropdown-menu {
-    position: fixed;
-    left: 0.75rem;
-    right: 0.75rem;
-    top: auto;
-    bottom: max(0.75rem, env(safe-area-inset-bottom));
-    width: auto;
+    max-width: calc(100vw - 1.5rem);
     z-index: 80;
-    border-radius: 14px;
   }
 
   .search-input {
@@ -2315,6 +2385,29 @@ body {
     top: max(4.5rem, calc(env(safe-area-inset-top) + 3.75rem));
     max-height: 70vh;
     overflow: auto;
+  }
+
+  #bookmarkDropdown .dropdown-menu {
+    position: absolute;
+    left: 0;
+    right: auto;
+    top: calc(100% + 4px);
+    bottom: auto;
+    width: min(208px, 100%);
+    min-width: min(208px, calc(100vw - 1.5rem));
+    max-width: calc(100vw - 1.5rem);
+    border-radius: 12px;
+  }
+
+  .site-notice {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.45rem;
+  }
+
+  .notice-report-btn {
+    margin-left: auto;
   }
 
   .notifications-menu {
