@@ -13,6 +13,8 @@ const genreCache = {
   tv: null
 };
 let countryCache = null;
+const searchCache = new Map();
+const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
 
 const sensitiveExactTitles = new Set([
   "overflow"
@@ -467,6 +469,12 @@ export async function searchCatalog(query, options = {}) {
 
   const requestedPages = Math.max(1, Math.min(20, Number(options.pages || 1)));
   const page = Math.max(1, Number(options.page || 1));
+  const cacheKey = `${text}::${page}::${requestedPages}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < SEARCH_CACHE_TTL_MS) {
+    return cached.result;
+  }
+
   const responses = await Promise.all(
     Array.from({ length: requestedPages }, (_unused, index) => {
       const requestPage = requestedPages > 1 ? index + 1 : page;
@@ -490,6 +498,35 @@ export async function searchCatalog(query, options = {}) {
       : normalized.filter((item) => isExactSensitiveSearch(item, text));
   }
 
+  if (!normalized.length && !sensitiveQuery) {
+    const alternates = buildSearchAlternates(text);
+    if (alternates.length) {
+      const fallbackResponses = await Promise.all(
+        alternates.slice(0, 2).map((alt) => tmdbRequest("/search/multi", {
+          query: alt,
+          include_adult: "false",
+          page
+        }).catch(() => ({ results: [], total_pages: 1 })))
+      );
+      const fallbackNormalized = dedupeByKey(fallbackResponses.flatMap((response) => normalizeList(response.results || [], {
+        allowSensitiveExact: true,
+        query: text
+      })))
+        .sort((a, b) => scoreSearchResult(b, text) - scoreSearchResult(a, text));
+      if (fallbackNormalized.length) {
+        const normalizedQuery = normalizeSearchText(text);
+        const maxDistance = Math.max(2, Math.floor(normalizedQuery.length * 0.34));
+        const fuzzyMatches = fallbackNormalized.filter((item) => {
+          const title = normalizeSearchText(item.title);
+          if (!title) return false;
+          return levenshteinDistance(normalizedQuery, title) <= maxDistance;
+        });
+        normalized = fuzzyMatches.length ? fuzzyMatches : fallbackNormalized;
+        responses.push(...fallbackResponses);
+      }
+    }
+  }
+
   cacheItems(normalized);
 
   const totalPages = Math.max(
@@ -497,13 +534,41 @@ export async function searchCatalog(query, options = {}) {
     ...responses.map((response) => Number(response.total_pages || 1) || 1)
   );
 
-  return {
+  const result = {
     all: normalized,
     movies: normalized.filter((item) => item.mediaType === "movie"),
     tv: normalized.filter((item) => item.mediaType === "tv"),
     page,
     totalPages
   };
+  searchCache.set(cacheKey, { timestamp: Date.now(), result });
+  return result;
+}
+
+function buildSearchAlternates(text) {
+  const alternates = new Set();
+  const cleaned = String(text || "")
+    .replace(/[^a-z0-9\s]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned && cleaned !== text) alternates.add(cleaned);
+  if (text.length > 4) alternates.add(text.slice(0, -1));
+  if (cleaned.length >= 6) {
+    alternates.add(cleaned.slice(0, 5));
+    alternates.add(cleaned.slice(0, 6));
+  }
+  const compact = cleaned.replace(/\s+/g, "");
+  if (compact.length > 4 && compact !== cleaned) alternates.add(compact);
+  const swapBase = cleaned.replace(/\s+/g, "");
+  if (swapBase.length >= 4) {
+    for (let i = 0; i < swapBase.length - 1; i += 1) {
+      const chars = swapBase.split("");
+      [chars[i], chars[i + 1]] = [chars[i + 1], chars[i]];
+      alternates.add(chars.join(""));
+      if (alternates.size >= 6) break;
+    }
+  }
+  return Array.from(alternates).slice(0, 5);
 }
 
 export async function fetchItemDetailsById(id, mediaType, options = {}) {
@@ -961,6 +1026,34 @@ function normalizeSearchText(value) {
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function levenshteinDistance(a, b) {
+  const s = String(a || "");
+  const t = String(b || "");
+  if (s === t) return 0;
+  if (!s) return t.length;
+  if (!t) return s.length;
+
+  const rows = s.length + 1;
+  const cols = t.length + 1;
+  const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
+  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dp[rows - 1][cols - 1];
 }
 
 function isReleasedAirDate(value) {

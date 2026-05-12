@@ -55,13 +55,24 @@ async function boot() {
   el.searchPageStatus.textContent = "Loading results...";
 
   try {
-    const result = await searchCatalog(term, { page });
-    const items = result.all || [...(result.movies || []), ...(result.tv || [])];
-    renderPosterCards(items);
-    renderPagination(term, page, result.totalPages || 1);
-    el.searchPageStatus.textContent = items.length
-      ? `Page ${page} of ${Math.max(1, Number(result.totalPages || 1))} for "${term}".`
-      : `No results found for "${term}".`;
+    let result = await searchCatalog(term, { page });
+    let items = result.all || [...(result.movies || []), ...(result.tv || [])];
+    let activeTerm = term;
+    const correctedTerm = getCorrectedTerm(term, items);
+
+    if (correctedTerm && normalizeSearchQuery(correctedTerm) !== normalizeSearchQuery(term)) {
+      activeTerm = correctedTerm;
+      result = await searchCatalog(correctedTerm, { page });
+      items = result.all || [...(result.movies || []), ...(result.tv || [])];
+    }
+
+    const ranked = rankFuzzyResults(activeTerm, items);
+    renderPosterCards(ranked);
+    renderPagination(activeTerm, page, result.totalPages || 1);
+    el.searchPageTitle.textContent = `Search: ${activeTerm}`;
+    el.searchPageStatus.textContent = ranked.length
+      ? `Page ${page} of ${Math.max(1, Number(result.totalPages || 1))} for "${activeTerm}".`
+      : `No results found for "${activeTerm}".`;
   } catch {
     renderPosterCards([]);
     renderPagination(term, 1, 1);
@@ -81,6 +92,8 @@ function renderPosterCards(items) {
     const sub = node.querySelector(".poster-sub");
 
     setPosterImage(image, item);
+    image.loading = "lazy";
+    image.decoding = "async";
     image.alt = `${item.title} poster`;
     title.textContent = item.title;
     sub.textContent = [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
@@ -91,8 +104,99 @@ function renderPosterCards(items) {
   });
 
   el.searchPageGrid.appendChild(fragment);
-  balancePosterGrid(el.searchPageGrid);
   initDragScroll();
+}
+
+function rankFuzzyResults(query, items) {
+  const normalizedQuery = normalizeSearchQuery(query);
+  if (!normalizedQuery) return items || [];
+
+  const scored = (items || []).map((item, index) => {
+    const normalizedTitle = normalizeSearchQuery(item.title);
+    const score = fuzzyScore(normalizedQuery, normalizedTitle);
+    return { item, index, score };
+  });
+
+  const hasSignal = scored.some((entry) => entry.score > 0);
+  if (!hasSignal) return items || [];
+
+  return scored
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .map((entry) => entry.item);
+}
+
+function getCorrectedTerm(query, items) {
+  const normalizedQuery = normalizeSearchQuery(query);
+  if (!normalizedQuery) return "";
+
+  let best = null;
+  let bestScore = 0;
+
+  (items || []).forEach((item) => {
+    const title = String(item.title || "").trim();
+    if (!title) return;
+    const normalizedTitle = normalizeSearchQuery(title);
+    if (!normalizedTitle) return;
+    const score = fuzzyScore(normalizedQuery, normalizedTitle);
+    if (score > bestScore) {
+      bestScore = score;
+      best = title;
+    }
+  });
+
+  if (!best || bestScore < 2000) return "";
+
+  const distance = levenshteinDistance(normalizeSearchQuery(query), normalizeSearchQuery(best));
+  if (distance > 2) return "";
+  if (best.length > query.length + 2) return "";
+  return best;
+}
+
+function fuzzyScore(query, title) {
+  if (!query || !title) return 0;
+  if (title === query) return 10000;
+  if (title.startsWith(query)) return 8000;
+  if (title.includes(query)) return 5000;
+  const distance = levenshteinDistance(query, title);
+  if (distance <= 2) return 2000 - (distance * 500);
+  return 0;
+}
+
+function normalizeSearchQuery(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function levenshteinDistance(a, b) {
+  const s = String(a || "");
+  const t = String(b || "");
+  if (s === t) return 0;
+  if (!s) return t.length;
+  if (!t) return s.length;
+
+  const rows = s.length + 1;
+  const cols = t.length + 1;
+  const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
+  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dp[rows - 1][cols - 1];
 }
 
 function renderPagination(term, current, totalPages) {

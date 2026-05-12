@@ -1231,7 +1231,9 @@ export function initSharedNavSearch(options = {}) {
     }
     try {
       const result = await searchCatalog(term, { page: 1 });
-      renderSharedSearchSuggestions(suggestions, result.all || [...(result.movies || []), ...(result.tv || [])]);
+      const items = result.all || [...(result.movies || []), ...(result.tv || [])];
+      const ranked = rankFuzzyResults(term, items);
+      renderSharedSearchSuggestions(suggestions, ranked);
       options.onResults?.(result, term);
     } catch {
       hideSharedSearchSuggestions(suggestions);
@@ -1275,6 +1277,71 @@ function renderSharedSearchSuggestions(container, items) {
     `;
   }).join("");
   container.removeAttribute("hidden");
+}
+
+function rankFuzzyResults(query, items) {
+  const normalizedQuery = normalizeSearchQuery(query);
+  if (!normalizedQuery) return items || [];
+
+  const scored = (items || []).map((item, index) => {
+    const normalizedTitle = normalizeSearchQuery(item.title);
+    const score = fuzzyScore(normalizedQuery, normalizedTitle);
+    return { item, index, score };
+  });
+
+  const hasSignal = scored.some((entry) => entry.score > 0);
+  if (!hasSignal) return items || [];
+
+  return scored
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .map((entry) => entry.item);
+}
+
+function fuzzyScore(query, title) {
+  if (!query || !title) return 0;
+  if (title === query) return 10000;
+  if (title.startsWith(query)) return 8000;
+  if (title.includes(query)) return 5000;
+  const distance = levenshteinDistance(query, title);
+  if (distance <= 2) return 2000 - (distance * 500);
+  return 0;
+}
+
+function normalizeSearchQuery(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function levenshteinDistance(a, b) {
+  const s = String(a || "");
+  const t = String(b || "");
+  if (s === t) return 0;
+  if (!s) return t.length;
+  if (!t) return s.length;
+
+  const rows = s.length + 1;
+  const cols = t.length + 1;
+  const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
+  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dp[rows - 1][cols - 1];
 }
 
 function hideSharedSearchSuggestions(container) {

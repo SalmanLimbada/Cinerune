@@ -15,8 +15,9 @@ import {
 import { getBookmarksKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260508-toggle1";
 import { buildWatchHref, escapeHtml, formatSeconds, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
 
-const PLAYER_BASE = "https://www.vidking.net";
-const VIDSRC_BASE = "https://vidsrc-embed.ru/embed";
+const PLAYER_BASE = "https://www.vidking.net/embed";
+const VIDROCK_BASE = "https://vidrock.net";
+const VIDEASY_BASE = "https://player.videasy.net";
 const settingsKey = "cinerune:settings";
 const reportsKey = "cinerune:reports";
 const REPORT_LIMIT = 500;
@@ -61,7 +62,8 @@ const el = {
   reportMessage: document.getElementById("reportMessage"),
   cancelReport: document.getElementById("cancelReport"),
   playerServer1: document.getElementById("playerServer1"),
-  playerServer2: document.getElementById("playerServer2")
+  playerServer2: document.getElementById("playerServer2"),
+  playerServer3: document.getElementById("playerServer3")
 };
 
 const query = new URLSearchParams(window.location.search);
@@ -71,7 +73,7 @@ const state = {
   id: Number(query.get("id")) || 0,
   season: Number(query.get("s")) || 1,
   episode: Number(query.get("e")) || 1,
-  playerServer: "vidking",
+  playerServer: "videasy",
   resumeMode: query.get("resume") === "1",
   resumeAttempted: false,
   resumeTarget: 0,
@@ -89,7 +91,8 @@ const state = {
   settings: readJson(settingsKey, {
     autoPlay: false,
     nextEpisode: true,
-    autoNextSmart: true
+    autoNextSmart: true,
+    preferredServer: "videasy"
   }),
   progress: {},
   bookmarks: readJson(getBookmarksKey(null), {}),
@@ -109,7 +112,7 @@ async function boot() {
   initSharedNavSearch();
   initSharedFooterReport(() => state.session);
 
-
+  state.playerServer = normalizeServerId(state.settings?.preferredServer || state.playerServer);
   bindEvents();
   updatePlayerServerToggle();
   initHeaderNotifications();
@@ -140,10 +143,13 @@ function bindEvents() {
   el.nextEpisodeBtn.addEventListener("click", playNextEpisode);
 
   if (el.playerServer1) {
-    el.playerServer1.addEventListener("click", () => setPlayerServer("vidking"));
+    el.playerServer1.addEventListener("click", () => setPlayerServer("videasy"));
   }
   if (el.playerServer2) {
-    el.playerServer2.addEventListener("click", () => setPlayerServer("vidsrc"));
+    el.playerServer2.addEventListener("click", () => setPlayerServer("vidrock"));
+  }
+  if (el.playerServer3) {
+    el.playerServer3.addEventListener("click", () => setPlayerServer("vidking"));
   }
 
   el.seasonSelect.addEventListener("change", async () => {
@@ -526,6 +532,7 @@ async function renderRelated() {
     setPosterImage(image, item);
     image.alt = `${item.title} poster`;
     image.loading = "lazy";
+    image.decoding = "async";
 
     const badge = document.createElement("span");
     badge.className = "badge-hd";
@@ -702,6 +709,14 @@ function showBookmarkToast(message) {
 async function onPlayerMessage(event) {
   if (!event?.data) return;
 
+  const allowedOrigins = new Set([
+    "https://www.vidking.net",
+    "https://vidking.net",
+    "https://vidrock.net",
+    "https://player.videasy.net"
+  ]);
+  if (event.origin && !allowedOrigins.has(event.origin)) return;
+
   let parsed = event.data;
   if (typeof parsed === "string") {
     try {
@@ -711,22 +726,41 @@ async function onPlayerMessage(event) {
     }
   }
 
-  if (parsed?.type !== "PLAYER_EVENT" || !parsed?.data) return;
-  const data = parsed.data;
-  if (!data.id || !data.mediaType) return;
-  const mediaType = data.mediaType === "tv" ? "tv" : "movie";
-  const id = Number(data.id);
-  const season = Number(data.season) || state.season || 1;
-  const episode = Number(data.episode) || state.episode || 1;
+  let data = null;
+  let eventType = "timeupdate";
+
+  if (parsed?.type === "PLAYER_EVENT" && parsed?.data) {
+    data = { ...parsed.data };
+    eventType = data.event || eventType;
+  } else if (parsed?.type === "MEDIA_DATA" && parsed?.data) {
+    data = { ...parsed.data };
+  } else if (parsed && typeof parsed === "object" && parsed.id && parsed.type) {
+    data = { ...parsed };
+  }
+
+  if (!data) return;
+
+  const mediaType = data.mediaType || data.type;
+  if (mediaType !== "movie" && mediaType !== "tv") return;
+
+  const id = Number(data.id || data.tmdbId || 0);
+  if (!id) return;
+
+  const season = Number(data.season || data.last_season_watched || state.season || 1);
+  const episode = Number(data.episode || data.last_episode_watched || state.episode || 1);
   const key = `${mediaType}:${id}:${season}:${episode}`;
   const isCurrentTitle = mediaType === state.mediaType && id === Number(state.id);
-  const incomingTimestamp = Number(data.currentTime) || 0;
-  const incomingProgress = Number(data.progress) || 0;
+  const incomingTimestamp = Number(data.currentTime || data.timestamp || data.progress?.watched || 0) || 0;
+  const durationValue = Number(data.duration || data.progress?.duration || 0) || 0;
+  let incomingProgress = Number(data.progress || 0) || 0;
+  if (!incomingProgress && durationValue > 0 && incomingTimestamp > 0) {
+    incomingProgress = (incomingTimestamp / durationValue) * 100;
+  }
   const existing = state.progress[key] || null;
 
   if (
     existing
-    && data.event !== "ended"
+    && eventType !== "ended"
     && Number(existing.timestamp || 0) > 20
     && Number(existing.progress || 0) < 98
     && incomingTimestamp < 5
@@ -744,7 +778,7 @@ async function onPlayerMessage(event) {
     await syncEpisodeSelection();
   }
 
-  if (Number.isFinite(Number(data.currentTime))) {
+  if (Number.isFinite(Number(incomingTimestamp))) {
     state.lastPlaybackTime = Math.max(0, incomingTimestamp);
   }
 
@@ -766,22 +800,22 @@ async function onPlayerMessage(event) {
     season,
     episode,
     timestamp: incomingTimestamp,
-    duration: Number(data.duration) || 0,
+    duration: durationValue,
     progress: incomingProgress,
     updatedAt: Date.now(),
     title: state.item?.title || titleById(id, mediaType) || `Title ${id}`,
     poster: state.item?.poster || posterById(id, mediaType) || ""
   };
 
-  if (data.event === "ended") {
+  if (eventType === "ended") {
     state.progress[key].timestamp = 0;
     state.progress[key].progress = 100;
   }
 
   localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
-  queueAutoSync(data.event === "ended");
+  queueAutoSync(eventType === "ended");
 
-  if (data.event === "ended" && mediaType === "tv" && state.settings.autoNextSmart && isCurrentTitle) {
+  if (eventType === "ended" && mediaType === "tv" && state.settings.autoNextSmart && isCurrentTitle) {
     if (state.lastAutoNextKey === key) return;
     state.lastAutoNextKey = key;
     window.setTimeout(() => {
@@ -843,60 +877,77 @@ function stopFallbackProgress() {
 }
 
 function normalizeServerId(value) {
-  return value === "vidsrc" ? "vidsrc" : "vidking";
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "vidrock") return "vidrock";
+  if (normalized === "videasy") return "videasy";
+  if (normalized === "vidsrc") return "vidrock";
+  return "vidking";
 }
 
 function setPlayerServer(serverId) {
   const normalized = normalizeServerId(serverId);
   if (state.playerServer === normalized) return;
   state.playerServer = normalized;
+  state.resumeMode = true;
+  state.resumeAttempted = false;
+  state.resumeConfirmed = false;
+  state.settings.preferredServer = normalized;
+  localStorage.setItem(settingsKey, JSON.stringify(state.settings));
   updatePlayerServerToggle();
   loadPlayer();
 }
 
 function updatePlayerServerToggle() {
   const normalized = normalizeServerId(state.playerServer);
-  el.playerServer1?.classList.toggle("active", normalized === "vidking");
-  el.playerServer2?.classList.toggle("active", normalized === "vidsrc");
+  el.playerServer1?.classList.toggle("active", normalized === "videasy");
+  el.playerServer2?.classList.toggle("active", normalized === "vidrock");
+  el.playerServer3?.classList.toggle("active", normalized === "vidking");
 }
 
 function buildPlayerUrl(serverId) {
   const normalized = normalizeServerId(serverId);
-  if (normalized === "vidsrc") {
-    const base = `${VIDSRC_BASE}/${state.mediaType === "movie" ? "movie" : "tv"}`;
+  if (normalized === "vidrock") {
+    const base = state.mediaType === "movie"
+      ? `${VIDROCK_BASE}/movie/${state.id}`
+      : `${VIDROCK_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
     const url = new URL(base);
-    url.searchParams.set("tmdb", String(state.id));
+    url.searchParams.set("autoplay", state.settings.autoPlay || state.resumeMode ? "true" : "false");
     if (state.mediaType === "tv") {
-      url.searchParams.set("season", String(state.season));
-      url.searchParams.set("episode", String(state.episode));
-      if (state.settings.nextEpisode) {
-        url.searchParams.set("autonext", "1");
-      }
-    }
-    if (state.settings.autoPlay || state.resumeMode) {
-      url.searchParams.set("autoplay", "1");
-    } else {
-      url.searchParams.set("autoplay", "0");
+      url.searchParams.set("autonext", state.settings.nextEpisode ? "true" : "false");
     }
     if (state.resumeTarget > 0) {
-      url.searchParams.set("start", String(Math.floor(state.resumeTarget)));
+      url.searchParams.set("progress", String(Math.floor(state.resumeTarget)));
+    }
+    return url;
+  }
+
+  if (normalized === "videasy") {
+    const base = state.mediaType === "movie"
+      ? `${VIDEASY_BASE}/movie/${state.id}`
+      : `${VIDEASY_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
+    const url = new URL(base);
+    if (state.mediaType === "tv") {
+      url.searchParams.set("autoplayNextEpisode", state.settings.nextEpisode ? "true" : "false");
+      url.searchParams.set("episodeSelector", "true");
+    }
+    if (state.resumeTarget > 0) {
       url.searchParams.set("progress", String(Math.floor(state.resumeTarget)));
     }
     return url;
   }
 
   const baseUrl = state.mediaType === "movie"
-    ? `${PLAYER_BASE}/embed/movie/${state.id}`
-    : `${PLAYER_BASE}/embed/tv/${state.id}/${state.season}/${state.episode}`;
+    ? `${PLAYER_BASE}/movie/${state.id}`
+    : `${PLAYER_BASE}/tv/${state.id}/${state.season}/${state.episode}`;
   const url = new URL(baseUrl);
   if (state.settings.autoPlay || state.resumeMode) {
     url.searchParams.set("autoPlay", "true");
   }
-  if (state.settings.nextEpisode && state.mediaType === "tv") {
-    url.searchParams.set("nextEpisode", "true");
-  }
-  if (state.resumeTarget > 0) {
-    url.searchParams.set("progress", String(Math.floor(state.resumeTarget)));
+  if (state.mediaType === "tv") {
+    if (state.settings.nextEpisode) {
+      url.searchParams.set("nextEpisode", "true");
+    }
+    url.searchParams.set("episodeSelector", "true");
   }
   return url;
 }

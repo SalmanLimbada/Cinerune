@@ -108,6 +108,8 @@ export function balancePosterGrid(container) {
     const columns = getGridColumnCount(container);
     if (columns < 2) return;
 
+    if (cards.length < columns) return;
+
     const remainder = cards.length % columns;
     if (!remainder) return;
 

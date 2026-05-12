@@ -2318,15 +2318,26 @@ body {
     justify-content: space-between;
   }
 
+  .right-controls {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
+
   .right-controls > *,
   .left-controls > * {
     flex: 1 1 auto;
   }
 
+  /* Keep key control buttons from stretching on small screens */
+  .right-controls > .dropdown,
+  .right-controls > .control-btn {
+    flex: 0 0 auto;
+  }
+
   .player-server-toggle {
     width: 100%;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .player-server-toggle .segmented-btn {

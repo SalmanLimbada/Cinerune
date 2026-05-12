@@ -101,13 +101,16 @@
 
         <div class="player-controls">
           <div class="left-controls">
-            <button id="prevEpisodeBtn" class="control-btn" type="button">Prev</button>
-            <button id="nextEpisodeBtn" class="control-btn" type="button">Next</button>
+            <button id="prevEpisodeBtn" class="control-btn" type="button"><span aria-hidden="true">←</span> Prev</button>
+            <button id="nextEpisodeBtn" class="control-btn" type="button">Next <span aria-hidden="true">→</span></button>
           </div>
 
           <div class="right-controls">
             <div class="dropdown" id="bookmarkDropdown">
-              <button id="bookmarkTrigger" class="control-btn" type="button" hidden>Bookmark</button>
+              <button id="bookmarkTrigger" class="control-btn" type="button" hidden>
+                <span class="control-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 4h12v16l-6-4-6 4z"/></svg></span>
+                <span>Bookmark</span>
+              </button>
               <span id="bookmarkToast" class="bookmark-toast" hidden></span>
               <div id="bookmarkMenu" class="dropdown-menu" hidden>
                 <button class="bookmark-option" data-status="watching" type="button">Watching</button>
@@ -129,8 +132,9 @@
         <div class="server-row" aria-label="Player server">
           <p class="server-switch-note">Switch servers if the current server is not working.</p>
           <div class="segmented-toggle player-server-toggle" role="group">
-            <button id="playerServer1" class="segmented-btn" type="button" data-server="vidking"><span class="segmented-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17.5 19H8a5 5 0 1 1 1.1-9.88A6.5 6.5 0 0 1 21 13.25 3.75 3.75 0 0 1 17.5 19z"/></svg></span><span>Server 1</span></button>
-            <button id="playerServer2" class="segmented-btn" type="button" data-server="vidsrc"><span class="segmented-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17.5 19H8a5 5 0 1 1 1.1-9.88A6.5 6.5 0 0 1 21 13.25 3.75 3.75 0 0 1 17.5 19z"/></svg></span><span>Server 2</span></button>
+            <button id="playerServer1" class="segmented-btn" type="button" data-server="videasy"><span class="segmented-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17.5 19H8a5 5 0 1 1 1.1-9.88A6.5 6.5 0 0 1 21 13.25 3.75 3.75 0 0 1 17.5 19z"/></svg></span><span>Server 1</span></button>
+            <button id="playerServer2" class="segmented-btn" type="button" data-server="vidrock"><span class="segmented-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17.5 19H8a5 5 0 1 1 1.1-9.88A6.5 6.5 0 0 1 21 13.25 3.75 3.75 0 0 1 17.5 19z"/></svg></span><span>Server 2</span></button>
+            <button id="playerServer3" class="segmented-btn" type="button" data-server="vidking"><span class="segmented-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17.5 19H8a5 5 0 1 1 1.1-9.88A6.5 6.5 0 0 1 21 13.25 3.75 3.75 0 0 1 17.5 19z"/></svg></span><span>Server 3</span></button>
           </div>
         </div>
 
@@ -146,8 +150,8 @@
           <div class="row-head">
             <h2>You may also like</h2>
             <div>
-              <button id="relatedPrevBtn" class="arrow-btn" type="button">&#8592;</button>
-              <button id="relatedNextBtn" class="arrow-btn" type="button">&#8594;</button>
+              <button id="relatedPrevBtn" class="arrow-btn" type="button" aria-label="Previous">←</button>
+              <button id="relatedNextBtn" class="arrow-btn" type="button" aria-label="Next">→</button>
             </div>
           </div>
           <div id="relatedRail" class="poster-row"></div>
