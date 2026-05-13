@@ -13,6 +13,15 @@ const avatarOptions = [
   { id: "spider", label: "Spider-Man", src: "https://avatarfiles.alphacoders.com/254/254569.jpg" },
   { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" }
 ];
+const recentSearchesKey = "cinerune:recent-searches";
+const RECENT_SEARCH_LIMIT = 8;
+const settingsKey = "cinerune:settings";
+const defaultServerOrder = ["videasy", "vidrock", "vidking"];
+const serverLabels = {
+  videasy: "Videasy",
+  vidrock: "Vidrock",
+  vidking: "Vidking"
+};
 
 export function initSharedHeader() {
   const accountWrap = document.getElementById("accountMenuWrap");
@@ -474,6 +483,17 @@ function initSharedSettingsModal() {
             <div id="sharedAvatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
           </div>
 
+          <button class="settings-action-toggle" type="button" data-settings-toggle="servers" aria-expanded="false">
+            <span>
+              <strong>Server Order</strong>
+              <small>Choose how the watch page server buttons are arranged.</small>
+            </span>
+            <span class="settings-action-icon" aria-hidden="true">+</span>
+          </button>
+          <div class="settings-section" data-settings-panel="servers" hidden>
+            <div id="sharedServerOrderList" class="server-order-list" aria-label="Server order"></div>
+          </div>
+
           <button class="settings-action-toggle danger" type="button" data-settings-toggle="delete" aria-expanded="false">
             <span>
               <strong>Delete Account</strong>
@@ -521,6 +541,7 @@ function initSharedSettingsModal() {
   settingsModalState.saveEmail = modal.querySelector("#sharedSaveEmail");
   settingsModalState.savePassword = modal.querySelector("#sharedSavePassword");
   settingsModalState.avatarPicker = modal.querySelector("#sharedAvatarPicker");
+  settingsModalState.serverOrderList = modal.querySelector("#sharedServerOrderList");
   settingsModalState.actionToggles = [...modal.querySelectorAll("[data-settings-toggle]")];
 
   settingsModalState.backdrop?.addEventListener("click", closeSharedSettingsModal);
@@ -568,11 +589,116 @@ async function openSharedSettingsModal(initialPanelName) {
     settingsModalState.accountAvatar.src = avatarSrcById(avatarId);
   }
   renderSharedAvatarPicker(meta.avatarId || "none");
+  renderSharedServerOrder();
   closeSharedSettingsPanels();
   if (initialPanelName) {
     toggleSharedSettingsPanel(initialPanelName);
   }
   setSharedSettingsHint("");
+}
+
+function renderSharedServerOrder() {
+  if (!settingsModalState.serverOrderList) return;
+  const settings = readJson(settingsKey, {});
+  const order = normalizeServerOrder(settings?.serverOrder);
+  settingsModalState.serverOrderList.innerHTML = order.map((serverId, index) => `
+    <div class="server-order-item" data-server="${escapeHtml(serverId)}" tabindex="0">
+      <span class="server-order-grip" aria-hidden="true"></span>
+      <span>
+        <strong>Server ${index + 1}</strong>
+        <small>${escapeHtml(serverLabels[serverId] || serverId)}</small>
+      </span>
+    </div>
+  `).join("");
+
+  bindSharedServerOrderDrag();
+}
+
+function bindSharedServerOrderDrag() {
+  const list = settingsModalState.serverOrderList;
+  if (!list) return;
+  let dragged = null;
+  let pointerId = null;
+  let startY = 0;
+  let active = false;
+
+  list.querySelectorAll(".server-order-item").forEach((item) => {
+    item.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 && event.pointerType === "mouse") return;
+      dragged = item;
+      pointerId = event.pointerId;
+      startY = event.clientY;
+      active = false;
+      item.setPointerCapture?.(pointerId);
+    });
+
+    item.addEventListener("pointermove", (event) => {
+      if (!dragged || event.pointerId !== pointerId) return;
+      if (!active && Math.abs(event.clientY - startY) < 6) return;
+      active = true;
+      event.preventDefault();
+      dragged.classList.add("dragging");
+      dragged.style.pointerEvents = "none";
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".server-order-item");
+      dragged.style.pointerEvents = "";
+      if (!target || target === dragged || target.parentElement !== list) return;
+      const targetRect = target.getBoundingClientRect();
+      if (event.clientY > targetRect.top + targetRect.height / 2) {
+        target.after(dragged);
+      } else {
+        target.before(dragged);
+      }
+      updateSharedServerOrderLabels();
+    });
+
+    const endDrag = (event) => {
+      if (!dragged || event.pointerId !== pointerId) return;
+      dragged.releasePointerCapture?.(pointerId);
+      dragged.classList.remove("dragging");
+      dragged.style.pointerEvents = "";
+      if (active) persistSharedServerOrderFromDom();
+      dragged = null;
+      pointerId = null;
+      active = false;
+    };
+
+    item.addEventListener("pointerup", endDrag);
+    item.addEventListener("pointercancel", endDrag);
+  });
+}
+
+function updateSharedServerOrderLabels() {
+  settingsModalState.serverOrderList?.querySelectorAll(".server-order-item").forEach((item, index) => {
+    const label = item.querySelector("strong");
+    if (label) label.textContent = `Server ${index + 1}`;
+  });
+}
+
+function persistSharedServerOrderFromDom() {
+  const list = settingsModalState.serverOrderList;
+  const order = [...(list?.querySelectorAll(".server-order-item") || [])]
+    .map((item) => String(item.dataset.server || ""))
+    .filter(Boolean);
+  if (!order.length) return;
+  const settings = readJson(settingsKey, {});
+  const nextSettings = { ...settings, serverOrder: normalizeServerOrder(order) };
+  localStorage.setItem(settingsKey, JSON.stringify(nextSettings));
+  updateSharedServerOrderLabels();
+  window.dispatchEvent(new CustomEvent("cinerune:settings-updated", { detail: nextSettings }));
+  setSharedSettingsHint("Server order updated.");
+}
+
+function normalizeServerOrder(value) {
+  const seen = new Set();
+  const order = Array.isArray(value)
+    ? value.map((entry) => String(entry || "").toLowerCase()).filter((entry) => defaultServerOrder.includes(entry))
+    : [];
+  const normalized = [...order, ...defaultServerOrder].filter((entry) => {
+    if (seen.has(entry)) return false;
+    seen.add(entry);
+    return true;
+  });
+  return normalized.slice(0, defaultServerOrder.length);
 }
 
 function closeSharedSettingsModal() {
@@ -1221,25 +1347,45 @@ export function initSharedNavSearch(options = {}) {
     form.appendChild(suggestions);
   }
 
+  input.addEventListener("focus", () => {
+    if (sanitizeText(input.value, 80)) return;
+    renderSharedRecentSearches(suggestions);
+  });
+
+  input.addEventListener("input", () => {
+    const term = sanitizeText(input.value, 80);
+    if (term) hideSharedSearchSuggestions(suggestions);
+  });
+
   input.addEventListener("input", debounce(async () => {
     const term = sanitizeText(input.value, 80);
     if (input.value !== term) input.value = term;
     if (!term) {
-      hideSharedSearchSuggestions(suggestions);
+      renderSharedRecentSearches(suggestions);
       options.onClear?.();
+      return;
+    }
+    if (term.length < 2) {
+      hideSharedSearchSuggestions(suggestions);
       return;
     }
     try {
       const result = await searchCatalog(term, { page: 1 });
       const items = result.all || [...(result.movies || []), ...(result.tv || [])];
-      const ranked = rankFuzzyResults(term, items);
-      renderSharedSearchSuggestions(suggestions, ranked);
-      options.onResults?.(result, term);
+      const activeTerm = result.correctedQuery || result.query || term;
+      const ranked = rankFuzzyResults(activeTerm, items);
+      renderSharedSearchSuggestions(suggestions, ranked, activeTerm);
+      options.onResults?.(result, activeTerm);
     } catch {
       hideSharedSearchSuggestions(suggestions);
       options.onError?.();
     }
   }, 280));
+
+  form.addEventListener("submit", () => {
+    const term = sanitizeText(input.value, 80);
+    if (term) saveSharedRecentSearch(term);
+  });
 
   input.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
@@ -1250,20 +1396,86 @@ export function initSharedNavSearch(options = {}) {
     }
   });
 
+  suggestions.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-remove-recent-search]");
+    if (remove) {
+      event.preventDefault();
+      event.stopPropagation();
+      removeSharedRecentSearch(remove.dataset.removeRecentSearch);
+      renderSharedRecentSearches(suggestions);
+      input.focus();
+      return;
+    }
+
+    const recent = event.target.closest("[data-recent-search]");
+    if (recent) {
+      saveSharedRecentSearch(recent.dataset.recentSearch);
+      return;
+    }
+
+    const viewAll = event.target.closest("[data-view-all-results]");
+    if (viewAll) {
+      saveSharedRecentSearch(viewAll.dataset.viewAllResults);
+    }
+  });
+
   document.addEventListener("click", (event) => {
     if (form.contains(event.target)) return;
     hideSharedSearchSuggestions(suggestions);
   });
 }
 
-function renderSharedSearchSuggestions(container, items) {
-  const top = (items || []).slice(0, 8);
-  if (!top.length) {
+export function saveSharedRecentSearch(value) {
+  const term = sanitizeText(value, 80);
+  if (!term) return;
+  const normalized = normalizeSearchQuery(term);
+  const entries = getSharedRecentSearches()
+    .filter((entry) => normalizeSearchQuery(entry) !== normalized);
+  entries.unshift(term);
+  localStorage.setItem(recentSearchesKey, JSON.stringify(entries.slice(0, RECENT_SEARCH_LIMIT)));
+}
+
+function getSharedRecentSearches() {
+  const entries = readJson(recentSearchesKey, []);
+  return Array.isArray(entries)
+    ? entries.map((entry) => sanitizeText(entry, 80)).filter(Boolean).slice(0, RECENT_SEARCH_LIMIT)
+    : [];
+}
+
+function removeSharedRecentSearch(value) {
+  const normalized = normalizeSearchQuery(value);
+  const entries = getSharedRecentSearches()
+    .filter((entry) => normalizeSearchQuery(entry) !== normalized);
+  localStorage.setItem(recentSearchesKey, JSON.stringify(entries));
+}
+
+function renderSharedRecentSearches(container) {
+  const entries = getSharedRecentSearches();
+  if (!entries.length) {
     hideSharedSearchSuggestions(container);
     return;
   }
 
-  container.innerHTML = top.map((item, index) => {
+  container.innerHTML = entries.map((entry, index) => `
+    <div class="search-recent-row" style="animation-delay:${index * 25}ms">
+      <a class="search-recent-link" href="${escapeHtml(buildSearchHref(entry))}" data-recent-search="${escapeHtml(entry)}">
+        <span>${escapeHtml(entry)}</span>
+      </a>
+      <button class="search-recent-remove" type="button" data-remove-recent-search="${escapeHtml(entry)}" aria-label="Remove ${escapeHtml(entry)} from recent searches">x</button>
+    </div>
+  `).join("");
+  container.removeAttribute("hidden");
+}
+
+function renderSharedSearchSuggestions(container, items, term) {
+  const top = (items || []).slice(0, 8);
+  const cleanTerm = sanitizeText(term, 80);
+  if (!top.length && !cleanTerm) {
+    hideSharedSearchSuggestions(container);
+    return;
+  }
+
+  const rows = top.map((item, index) => {
     const type = item.mediaType === "movie" ? "Movie" : "TV";
     const subtitle = [type, item.year].filter(Boolean).join(" | ");
     return `
@@ -1275,8 +1487,24 @@ function renderSharedSearchSuggestions(container, items) {
         </span>
       </a>
     `;
-  }).join("");
+  });
+  if (cleanTerm) {
+    rows.push(`
+      <a class="search-view-all" href="${escapeHtml(buildSearchHref(cleanTerm))}" data-view-all-results="${escapeHtml(cleanTerm)}">
+        <span>View all results</span>
+        <span aria-hidden="true">&gt;</span>
+      </a>
+    `);
+  }
+  container.innerHTML = rows.join("");
   container.removeAttribute("hidden");
+}
+
+function buildSearchHref(term) {
+  const url = new URL("./search.html", window.location.href);
+  url.searchParams.set("q", sanitizeText(term, 80));
+  url.searchParams.delete("page");
+  return url.toString();
 }
 
 function rankFuzzyResults(query, items) {

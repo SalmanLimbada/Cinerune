@@ -95,7 +95,7 @@ export function initDragScroll(selector = ".poster-row, .explorer-rail") {
   });
 }
 
-export function balancePosterGrid(container) {
+export function balancePosterGrid(container, options = {}) {
   if (!container?.classList?.contains("poster-grid")) return;
 
   const apply = () => {
@@ -110,10 +110,19 @@ export function balancePosterGrid(container) {
 
     if (cards.length < columns) return;
 
-    const remainder = cards.length % columns;
-    if (!remainder) return;
+    const targetRows = Math.max(0, Number(options.targetRows || 0));
+    let visibleCount = cards.length;
+    if (targetRows > 0) {
+      visibleCount = Math.min(visibleCount, columns * targetRows);
+    }
 
-    cards.slice(cards.length - remainder).forEach((card) => {
+    const remainder = visibleCount % columns;
+    if (remainder) {
+      visibleCount -= remainder;
+    }
+    if (visibleCount < columns) return;
+
+    cards.slice(visibleCount).forEach((card) => {
       card.hidden = true;
     });
   };

@@ -3,7 +3,7 @@ import { fetchItemDetailsById } from "./catalog.js?v=20260508-toggle1";
 import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
 import { buildWatchHref, escapeHtml, readJson } from "./shared-utils.js?v=20260508-toggle1";
 
-const NEW_EPISODE_WINDOW_DAYS = 14;
+const NEW_EPISODE_WINDOW_DAYS = 45;
 
 let catalogReady = false;
 
@@ -117,8 +117,7 @@ async function loadNotificationState(session) {
   const readIds = new Set(readJson(getNotificationReadKey(session), []));
   const watchedShows = Object.values(bookmarks || {})
     .filter((entry) => entry?.mediaType === "tv" && (entry?.status === "watched" || entry?.status === "watching"))
-    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
-    .slice(0, 16);
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
   const notifications = (await Promise.all(
     watchedShows.map((entry) => buildEpisodeNotification(entry, progress))

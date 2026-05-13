@@ -8,7 +8,7 @@ const MAX_BODY_BYTES = 65536;
 const AUTH_RATE_LIMIT_DISABLED_VALUE = "true";
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin") || "*";
 
@@ -46,7 +46,7 @@ export default {
 
     try {
       if (url.pathname.startsWith("/api/tmdb/")) {
-        return withCors(await handleTmdbProxy(request, env, url), origin);
+        return withCors(await handleTmdbProxy(request, env, url, ctx), origin);
       }
 
       if (url.pathname === "/api/auth/login") {
@@ -106,7 +106,7 @@ export default {
   }
 };
 
-async function handleTmdbProxy(request, env, url) {
+async function handleTmdbProxy(request, env, url, ctx) {
   if (request.method !== "GET") {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
@@ -121,6 +121,14 @@ async function handleTmdbProxy(request, env, url) {
     tmdbUrl.searchParams.set(key, value);
   });
 
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const cacheTtl = tmdbCacheTtlSeconds(tmdbPath);
+  const cacheKey = cache ? new Request(url.toString(), { method: "GET" }) : null;
+  if (cache && cacheTtl > 0) {
+    const cached = await cache.match(cacheKey);
+    if (cached) return new Response(cached.body, cached);
+  }
+
   const response = await fetch(tmdbUrl.toString(), {
     headers: {
       Accept: "application/json",
@@ -128,7 +136,28 @@ async function handleTmdbProxy(request, env, url) {
     }
   });
 
-  return proxyJson(response);
+  const proxied = await proxyJson(response, {
+    "Cache-Control": response.ok && cacheTtl > 0
+      ? `public, max-age=${cacheTtl}, s-maxage=${cacheTtl}, stale-while-revalidate=86400`
+      : "no-store"
+  });
+
+  if (cache && cacheKey && response.ok && cacheTtl > 0) {
+    ctx?.waitUntil(cache.put(cacheKey, proxied.clone()));
+  }
+
+  return proxied;
+}
+
+function tmdbCacheTtlSeconds(path) {
+  if (path.startsWith("/search/")) return 5 * 60;
+  if (path.includes("/recommendations")) return 30 * 60;
+  if (path.includes("/season/")) return 30 * 60;
+  if (path.startsWith("/configuration/") || path.startsWith("/genre/")) return 7 * 24 * 60 * 60;
+  if (path.startsWith("/trending/")) return 15 * 60;
+  if (path.startsWith("/discover/") || path.includes("/popular") || path.includes("/top_rated")) return 60 * 60;
+  if (/^\/(movie|tv)\/\d+/.test(path)) return 6 * 60 * 60;
+  return 30 * 60;
 }
 
 async function handleAuthLogin(request, env) {
@@ -989,12 +1018,13 @@ function jsonProxyFromText(text, status = 200) {
   });
 }
 
-async function proxyJson(response) {
+async function proxyJson(response, headers = {}) {
   const text = await response.text();
   return new Response(text || "{}", {
     status: response.status,
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...headers
     }
   });
 }

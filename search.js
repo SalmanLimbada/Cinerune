@@ -1,7 +1,7 @@
 import {
   searchCatalog
 } from "./catalog.js?v=20260508-toggle1";
-import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
+import { initSharedHeader, saveSharedRecentSearch } from "./shared-ui.js?v=20260508-toggle1";
 import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
 import { initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
 import { buildWatchHref, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
@@ -38,6 +38,7 @@ async function boot() {
       el.searchPageInput.value = nextTerm;
     }
     if (!nextTerm) return;
+    saveSharedRecentSearch(nextTerm);
     const url = new URL("./search.html", window.location.href);
     url.searchParams.set("q", nextTerm);
     url.searchParams.delete("page");
@@ -55,14 +56,14 @@ async function boot() {
   el.searchPageStatus.textContent = "Loading results...";
 
   try {
-    let result = await searchCatalog(term, { page });
+    let result = await searchCatalog(term, { page, pages: 4 });
     let items = result.all || [...(result.movies || []), ...(result.tv || [])];
-    let activeTerm = term;
-    const correctedTerm = getCorrectedTerm(term, items);
+    let activeTerm = result.correctedQuery || result.query || term;
+    const correctedTerm = result.correctedQuery ? "" : getCorrectedTerm(term, items);
 
     if (correctedTerm && normalizeSearchQuery(correctedTerm) !== normalizeSearchQuery(term)) {
       activeTerm = correctedTerm;
-      result = await searchCatalog(correctedTerm, { page });
+      result = await searchCatalog(correctedTerm, { page, pages: 4 });
       items = result.all || [...(result.movies || []), ...(result.tv || [])];
     }
 
@@ -104,6 +105,7 @@ function renderPosterCards(items) {
   });
 
   el.searchPageGrid.appendChild(fragment);
+  balancePosterGrid(el.searchPageGrid, { targetRows: 3 });
   initDragScroll();
 }
 
@@ -144,7 +146,7 @@ function getCorrectedTerm(query, items) {
     }
   });
 
-  if (!best || bestScore < 2000) return "";
+  if (!best || bestScore < 1000) return "";
 
   const distance = levenshteinDistance(normalizeSearchQuery(query), normalizeSearchQuery(best));
   if (distance > 2) return "";

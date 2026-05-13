@@ -19,6 +19,7 @@ const PLAYER_BASE = "https://www.vidking.net/embed";
 const VIDROCK_BASE = "https://vidrock.net";
 const VIDEASY_BASE = "https://player.videasy.net";
 const settingsKey = "cinerune:settings";
+const defaultServerOrder = ["videasy", "vidrock", "vidking"];
 const reportsKey = "cinerune:reports";
 const REPORT_LIMIT = 500;
 
@@ -92,7 +93,8 @@ const state = {
     autoPlay: false,
     nextEpisode: true,
     autoNextSmart: true,
-    preferredServer: "videasy"
+    preferredServer: "videasy",
+    serverOrder: defaultServerOrder
   }),
   progress: {},
   bookmarks: readJson(getBookmarksKey(null), {}),
@@ -113,6 +115,8 @@ async function boot() {
   initSharedFooterReport(() => state.session);
 
   state.playerServer = normalizeServerId(state.settings?.preferredServer || state.playerServer);
+  state.settings.serverOrder = normalizeServerOrder(state.settings?.serverOrder);
+  applyPlayerServerOrder();
   bindEvents();
   updatePlayerServerToggle();
   initHeaderNotifications();
@@ -134,8 +138,8 @@ async function boot() {
 
   hydrateInfo();
   await hydrateEpisodeControls();
-  await renderRelated();
   loadPlayer();
+  deferSecondaryWatchContent();
 }
 
 function bindEvents() {
@@ -156,6 +160,7 @@ function bindEvents() {
     state.season = Number(el.seasonSelect.value) || 1;
     state.episode = 1;
     await refillEpisodeGrid();
+    updateWatchLocation();
     loadPlayer();
   });
 
@@ -244,9 +249,15 @@ function bindEvents() {
 
   window.addEventListener("message", onPlayerMessage);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") queueAutoSync(true);
+    if (document.visibilityState === "hidden") {
+      persistFallbackProgressSnapshot();
+      queueAutoSync(true);
+    }
   });
-  window.addEventListener("beforeunload", () => queueAutoSync(true));
+  window.addEventListener("beforeunload", () => {
+    persistFallbackProgressSnapshot();
+    queueAutoSync(true);
+  });
   window.addEventListener("storage", (event) => {
     if (event.key !== "cinerune:session") return;
     void initAuth();
@@ -257,6 +268,23 @@ function bindEvents() {
     state.bookmarks = readJson(getBookmarksKey(state.session), {});
     syncBookmarkButton();
     renderWatchAccountUI();
+  });
+  window.addEventListener("cinerune:settings-updated", (event) => {
+    state.settings = {
+      ...state.settings,
+      ...(event.detail || {})
+    };
+    state.settings.serverOrder = normalizeServerOrder(state.settings.serverOrder);
+    state.playerServer = normalizeServerId(state.settings.preferredServer || state.playerServer);
+    applyPlayerServerOrder();
+    updatePlayerServerToggle();
+  });
+  window.addEventListener("storage", (event) => {
+    if (event.key !== settingsKey) return;
+    state.settings = readJson(settingsKey, state.settings);
+    state.settings.serverOrder = normalizeServerOrder(state.settings.serverOrder);
+    applyPlayerServerOrder();
+    updatePlayerServerToggle();
   });
 }
 
@@ -317,6 +345,20 @@ async function hydrateEpisodeControls() {
   await refillEpisodeGrid();
 }
 
+function deferSecondaryWatchContent() {
+  const load = () => {
+    renderRelated().catch(() => {
+      if (el.relatedRail) el.relatedRail.innerHTML = "";
+    });
+  };
+
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(load, { timeout: 1500 });
+  } else {
+    window.setTimeout(load, 250);
+  }
+}
+
 async function refillEpisodeGrid() {
   if (!el.episodeGrid) return;
   const episodes = await fetchSeasonEpisodes(state.id, state.season);
@@ -365,6 +407,7 @@ function formatEpisodeDate(value) {
 function playEpisode(episode) {
   state.episode = Number(episode) || 1;
   syncEpisodeSelection();
+  updateWatchLocation();
   loadPlayer();
 }
 
@@ -377,6 +420,7 @@ async function playPrevEpisode() {
     state.episode = Math.max(1, await episodeCount(state.id, state.season));
   }
   await hydrateEpisodeControls();
+  updateWatchLocation();
   loadPlayer();
 }
 
@@ -398,6 +442,7 @@ async function playNextEpisode() {
   }
 
   await hydrateEpisodeControls();
+  updateWatchLocation();
   loadPlayer();
 }
 
@@ -417,7 +462,7 @@ async function syncEpisodeSelection() {
 
 function loadPlayer() {
   clearResumeTimers();
-  stopFallbackProgress();
+  stopFallbackProgress({ persist: true });
   state.lastPlayerEventAt = 0;
   state.lastPlaybackTime = 0;
   state.resumeConfirmed = false;
@@ -426,8 +471,6 @@ function loadPlayer() {
   const serverId = normalizeServerId(state.playerServer);
   state.playerSupportsCommands = false;
   state.playerLoadedAt = 0;
-
-  const url = buildPlayerUrl(serverId);
 
   const resume = state.resumeMode && !state.resumeAttempted ? getSavedProgress() : null;
   let appliedResume = false;
@@ -450,6 +493,7 @@ function loadPlayer() {
     state.resumeAttempted = true;
   }
 
+  const url = buildPlayerUrl(serverId);
   el.playerFrame.src = url.toString();
   scheduleResumeSeek(appliedResume);
   ensureProgressEntry();
@@ -776,6 +820,7 @@ async function onPlayerMessage(event) {
     state.season = season;
     state.episode = episode;
     await syncEpisodeSelection();
+    updateWatchLocation();
   }
 
   if (Number.isFinite(Number(incomingTimestamp))) {
@@ -867,7 +912,10 @@ function startFallbackProgress() {
   }, 5000);
 }
 
-function stopFallbackProgress() {
+function stopFallbackProgress(options = {}) {
+  if (options.persist) {
+    persistFallbackProgressSnapshot();
+  }
   if (state.serverProgressTimer) {
     window.clearInterval(state.serverProgressTimer);
     state.serverProgressTimer = null;
@@ -876,12 +924,76 @@ function stopFallbackProgress() {
   state.serverProgressBaseTimestamp = 0;
 }
 
+function persistFallbackProgressSnapshot() {
+  if (!state.serverProgressTimer || !state.serverProgressStartedAt) return;
+  if (state.playerSupportsCommands || state.lastPlayerEventAt) return;
+
+  const elapsedSeconds = Math.floor((Date.now() - state.serverProgressStartedAt) / 1000);
+  if (elapsedSeconds < 1) return;
+
+  const key = `${state.mediaType}:${state.id}:${state.season}:${state.episode}`;
+  const existing = state.progress[key] || null;
+  const timestamp = Math.max(0, Number(state.serverProgressBaseTimestamp || 0) + elapsedSeconds);
+  const duration = Number(existing?.duration || 0);
+  const progress = duration > 0
+    ? Math.max(Number(existing?.progress || 0), Math.min(95, (timestamp / duration) * 100))
+    : Math.max(Number(existing?.progress || 0), Math.min(95, Math.round(timestamp / 60)));
+
+  state.progress[key] = {
+    mediaType: state.mediaType,
+    id: state.id,
+    season: state.season,
+    episode: state.episode,
+    timestamp,
+    duration,
+    progress,
+    updatedAt: Date.now(),
+    title: state.item?.title || titleById(state.id, state.mediaType) || `Title ${state.id}`,
+    poster: state.item?.poster || posterById(state.id, state.mediaType) || ""
+  };
+
+  localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
+  queueAutoSync();
+}
+
+function updateWatchLocation() {
+  if (!state.id || state.mediaType !== "tv") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("id", String(state.id));
+  url.searchParams.set("type", "tv");
+  url.searchParams.set("s", String(state.season || 1));
+  url.searchParams.set("e", String(state.episode || 1));
+  window.history.replaceState({}, document.title, url.toString());
+}
+
 function normalizeServerId(value) {
   const normalized = String(value || "").toLowerCase();
   if (normalized === "vidrock") return "vidrock";
   if (normalized === "videasy") return "videasy";
   if (normalized === "vidsrc") return "vidrock";
   return "vidking";
+}
+
+function normalizeServerOrder(value) {
+  const seen = new Set();
+  const order = Array.isArray(value)
+    ? value.map((entry) => normalizeServerId(entry)).filter((entry) => defaultServerOrder.includes(entry))
+    : [];
+  return [...order, ...defaultServerOrder].filter((entry) => {
+    if (seen.has(entry)) return false;
+    seen.add(entry);
+    return true;
+  }).slice(0, defaultServerOrder.length);
+}
+
+function applyPlayerServerOrder() {
+  const toggle = document.querySelector(".player-server-toggle");
+  if (!toggle) return;
+  const order = normalizeServerOrder(state.settings?.serverOrder);
+  order.forEach((serverId) => {
+    const button = toggle.querySelector(`[data-server="${serverId}"]`);
+    if (button) toggle.appendChild(button);
+  });
 }
 
 function setPlayerServer(serverId) {
@@ -899,9 +1011,14 @@ function setPlayerServer(serverId) {
 
 function updatePlayerServerToggle() {
   const normalized = normalizeServerId(state.playerServer);
-  el.playerServer1?.classList.toggle("active", normalized === "videasy");
-  el.playerServer2?.classList.toggle("active", normalized === "vidrock");
-  el.playerServer3?.classList.toggle("active", normalized === "vidking");
+  const toggle = document.querySelector(".player-server-toggle");
+  const buttons = toggle ? [...toggle.querySelectorAll("[data-server]")] : [];
+  buttons.forEach((button, index) => {
+    const serverId = normalizeServerId(button.dataset.server);
+    button.classList.toggle("active", normalized === serverId);
+    const label = button.querySelector("span:last-child");
+    if (label) label.textContent = `Server ${index + 1}`;
+  });
 }
 
 function buildPlayerUrl(serverId) {

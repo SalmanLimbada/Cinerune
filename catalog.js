@@ -464,7 +464,7 @@ export async function fetchGenreSections() {
 
 export async function searchCatalog(query, options = {}) {
   const text = String(query || "").trim();
-  if (!text) return { all: [], movies: [], tv: [], page: 1, totalPages: 1 };
+  if (!text) return { all: [], movies: [], tv: [], page: 1, totalPages: 1, correctedQuery: "" };
   const sensitiveQuery = isSensitiveSearchQuery(text);
 
   const requestedPages = Math.max(1, Math.min(20, Number(options.pages || 1)));
@@ -475,16 +475,9 @@ export async function searchCatalog(query, options = {}) {
     return cached.result;
   }
 
-  const responses = await Promise.all(
-    Array.from({ length: requestedPages }, (_unused, index) => {
-      const requestPage = requestedPages > 1 ? index + 1 : page;
-      return tmdbRequest("/search/multi", {
-        query: text,
-        include_adult: "false",
-        page: requestPage
-      }).catch(() => ({ results: [], total_pages: 1 }));
-    })
-  );
+  let activeQuery = text;
+  let correctedQuery = "";
+  let responses = await searchTmdbPages(text, page, requestedPages);
 
   let normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [], {
     allowSensitiveExact: true,
@@ -502,7 +495,7 @@ export async function searchCatalog(query, options = {}) {
     const alternates = buildSearchAlternates(text);
     if (alternates.length) {
       const fallbackResponses = await Promise.all(
-        alternates.slice(0, 2).map((alt) => tmdbRequest("/search/multi", {
+        alternates.slice(0, 8).map((alt) => tmdbRequest("/search/multi", {
           query: alt,
           include_adult: "false",
           page
@@ -514,15 +507,17 @@ export async function searchCatalog(query, options = {}) {
       })))
         .sort((a, b) => scoreSearchResult(b, text) - scoreSearchResult(a, text));
       if (fallbackNormalized.length) {
-        const normalizedQuery = normalizeSearchText(text);
-        const maxDistance = Math.max(2, Math.floor(normalizedQuery.length * 0.34));
-        const fuzzyMatches = fallbackNormalized.filter((item) => {
-          const title = normalizeSearchText(item.title);
-          if (!title) return false;
-          return levenshteinDistance(normalizedQuery, title) <= maxDistance;
-        });
-        normalized = fuzzyMatches.length ? fuzzyMatches : fallbackNormalized;
-        responses.push(...fallbackResponses);
+        const correction = pickSearchCorrection(text, fallbackNormalized);
+        if (correction) {
+          activeQuery = correction;
+          correctedQuery = correction;
+          responses = await searchTmdbPages(correction, page, requestedPages);
+          normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [], {
+            allowSensitiveExact: true,
+            query: correction
+          })))
+            .sort((a, b) => scoreSearchResult(b, correction) - scoreSearchResult(a, correction));
+        }
       }
     }
   }
@@ -539,10 +534,102 @@ export async function searchCatalog(query, options = {}) {
     movies: normalized.filter((item) => item.mediaType === "movie"),
     tv: normalized.filter((item) => item.mediaType === "tv"),
     page,
-    totalPages
+    totalPages,
+    correctedQuery,
+    query: activeQuery
   };
   searchCache.set(cacheKey, { timestamp: Date.now(), result });
   return result;
+}
+
+async function searchTmdbPages(text, page, requestedPages) {
+  return Promise.all(
+    Array.from({ length: requestedPages }, (_unused, index) => {
+      const requestPage = requestedPages > 1 ? page + index : page;
+      return tmdbRequest("/search/multi", {
+        query: text,
+        include_adult: "false",
+        page: requestPage
+      }).catch(() => ({ results: [], total_pages: 1 }));
+    })
+  );
+}
+
+function pickSearchCorrection(query, items) {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery || normalizedQuery.length < 4) return "";
+
+  let best = null;
+  let bestDistance = Infinity;
+  let bestScore = -Infinity;
+
+  items.forEach((item) => {
+    const title = String(item?.title || "").trim();
+    const correction = scoreTitleCorrection(normalizedQuery, title);
+    if (!correction) return;
+    const score = scoreSearchResult(item, query) + correction.score;
+    if (correction.distance < bestDistance || (correction.distance === bestDistance && score > bestScore)) {
+      best = title;
+      bestDistance = correction.distance;
+      bestScore = score;
+    }
+  });
+
+  return best || "";
+}
+
+function scoreTitleCorrection(normalizedQuery, title) {
+  const normalizedTitle = normalizeSearchText(title);
+  if (!normalizedQuery || !normalizedTitle) return null;
+
+  const directDistance = levenshteinDistance(normalizedQuery, normalizedTitle);
+  const directMax = Math.max(1, Math.min(4, Math.floor(normalizedQuery.length * 0.34)));
+  if (directDistance <= directMax && normalizedTitle.length <= normalizedQuery.length + 6) {
+    return {
+      distance: directDistance,
+      score: 6000 - (directDistance * 550)
+    };
+  }
+
+  const queryTokens = normalizedQuery.split(" ").filter(Boolean);
+  const titleTokens = normalizedTitle.split(" ").filter(Boolean);
+  if (!queryTokens.length || !titleTokens.length) return null;
+
+  let totalDistance = 0;
+  let matchedStrongToken = false;
+
+  for (const queryToken of queryTokens) {
+    let tokenDistance = Infinity;
+    for (const titleToken of titleTokens) {
+      if (titleToken === queryToken) {
+        tokenDistance = 0;
+        break;
+      }
+      if (queryToken.length >= 4 && titleToken.startsWith(queryToken)) {
+        tokenDistance = Math.min(tokenDistance, 0.5);
+      }
+      tokenDistance = Math.min(tokenDistance, levenshteinDistance(queryToken, titleToken));
+    }
+
+    const maxTokenDistance = queryToken.length <= 3
+      ? 0
+      : Math.max(1, Math.min(3, Math.floor(queryToken.length * 0.34)));
+    if (tokenDistance > maxTokenDistance) return null;
+    if (queryToken.length >= 4 && tokenDistance <= maxTokenDistance) {
+      matchedStrongToken = true;
+    }
+    totalDistance += tokenDistance;
+  }
+
+  if (!matchedStrongToken && queryTokens.some((token) => token.length >= 4)) return null;
+
+  const extraTitleTokens = Math.max(0, titleTokens.length - queryTokens.length);
+  if (extraTitleTokens > 2) return null;
+
+  return {
+    distance: totalDistance + (extraTitleTokens * 0.35),
+    score: 5200 - (totalDistance * 500) - (extraTitleTokens * 120)
+  };
 }
 
 function buildSearchAlternates(text) {
@@ -552,11 +639,22 @@ function buildSearchAlternates(text) {
     .replace(/\s+/g, " ")
     .trim();
   if (cleaned && cleaned !== text) alternates.add(cleaned);
+  const words = cleaned.split(" ").filter(Boolean);
+  words
+    .filter((word) => word.length >= 3)
+    .sort((a, b) => b.length - a.length)
+    .forEach((word) => alternates.add(word));
   if (text.length > 4) alternates.add(text.slice(0, -1));
   if (cleaned.length >= 6) {
     alternates.add(cleaned.slice(0, 5));
     alternates.add(cleaned.slice(0, 6));
   }
+  words
+    .filter((word) => word.length >= 5)
+    .forEach((word) => {
+      alternates.add(word.slice(0, -1));
+      alternates.add(word.slice(0, Math.min(6, word.length)));
+    });
   const compact = cleaned.replace(/\s+/g, "");
   if (compact.length > 4 && compact !== cleaned) alternates.add(compact);
   const swapBase = cleaned.replace(/\s+/g, "");
@@ -568,7 +666,7 @@ function buildSearchAlternates(text) {
       if (alternates.size >= 6) break;
     }
   }
-  return Array.from(alternates).slice(0, 5);
+  return Array.from(alternates).slice(0, 10);
 }
 
 export async function fetchItemDetailsById(id, mediaType, options = {}) {

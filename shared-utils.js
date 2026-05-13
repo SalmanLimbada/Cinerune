@@ -57,15 +57,37 @@ export function setPosterImage(image, item, options = {}) {
   image.loading = options.eager ? "eager" : "lazy";
   image.decoding = "async";
   if (options.eager) image.fetchPriority = "high";
+  const srcset = buildTmdbPosterSrcSet(item?.poster);
+  if (srcset) {
+    image.srcset = srcset;
+    image.sizes = options.sizes || "(max-width: 640px) 42vw, (max-width: 1100px) 24vw, 185px";
+  } else {
+    image.removeAttribute("srcset");
+    image.removeAttribute("sizes");
+  }
   image.onload = () => image.classList.add("is-loaded");
   image.onerror = () => {
     image.onerror = null;
     image.onload = null;
+    image.removeAttribute("srcset");
+    image.removeAttribute("sizes");
     image.classList.add("is-loaded");
     image.src = fallback;
   };
   image.src = item?.poster || fallback;
   if (!item?.poster) image.classList.add("is-loaded");
+}
+
+function buildTmdbPosterSrcSet(src) {
+  const value = String(src || "");
+  const match = value.match(/^https:\/\/image\.tmdb\.org\/t\/p\/w\d+(.+)$/);
+  if (!match) return "";
+  const path = match[1];
+  return [
+    `https://image.tmdb.org/t/p/w185${path} 185w`,
+    `https://image.tmdb.org/t/p/w342${path} 342w`,
+    `https://image.tmdb.org/t/p/w500${path} 500w`
+  ].join(", ");
 }
 
 export function debounce(fn, wait) {

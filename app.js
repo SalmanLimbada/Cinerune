@@ -18,7 +18,7 @@ const fetchItemDetailsById = catalogApi.fetchItemDetailsById;
 const isSensitiveCatalogItem = catalogApi.isSensitiveCatalogItem || (() => false);
 
 const homeCacheKey = "cinerune:home-cache";
-const NEW_EPISODE_WINDOW_DAYS = 14;
+const NEW_EPISODE_WINDOW_DAYS = 45;
 const INPUT_LIMITS = {
   identifierMax: 80,
   usernameMax: 24,
@@ -772,8 +772,7 @@ async function refreshNotifications() {
 
   const watchedShows = Object.values(state.bookmarks || {})
     .filter((entry) => entry?.mediaType === "tv" && (entry?.status === "watched" || entry?.status === "watching"))
-    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
-    .slice(0, 16);
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
   const notifications = (await Promise.all(watchedShows.map(buildEpisodeNotification))).filter(Boolean);
   state.notifications = notifications.sort((a, b) => Number(b.sortAt || 0) - Number(a.sortAt || 0));
