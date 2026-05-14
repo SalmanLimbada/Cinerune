@@ -597,6 +597,10 @@ body {
   padding-top: 0.22rem;
 }
 
+.genre-fallback-note {
+  margin: -0.35rem 0 0;
+}
+
 .continue-remove-btn {
   position: absolute;
   top: 0.35rem;
@@ -630,6 +634,52 @@ body {
 
 .continue-remove-btn:hover {
   background: rgba(189, 42, 60, 0.96);
+}
+
+.bookmark-switch-control {
+  position: absolute;
+  left: 0.35rem;
+  top: 1.55rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  z-index: 3;
+}
+
+.bookmark-switch-icon {
+  width: 100%;
+  height: 100%;
+  border: 1px solid rgba(126, 216, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(7, 17, 30, 0.9);
+  color: #eef7ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+.bookmark-switch-icon svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+  stroke: currentColor;
+}
+
+.bookmark-switch-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.bookmark-switch-select:focus {
+  outline: none;
+}
+
+.bookmark-switch-control:focus-within .bookmark-switch-icon {
+  border-color: rgba(126, 216, 255, 0.68);
 }
 
 .poster-title {
@@ -1472,6 +1522,19 @@ body {
   position: relative;
 }
 
+.menu-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 12, 22, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 55;
+  pointer-events: auto;
+}
+
+.menu-scrim[hidden] {
+  display: none;
+}
+
 .icon-pill {
   position: relative;
   display: inline-flex;
@@ -1631,6 +1694,12 @@ body {
 
 .mini-action-btn:hover {
   background: rgba(126, 216, 255, 0.18);
+}
+
+.notification-read-btn.is-read {
+  border-color: rgba(145, 178, 205, 0.16);
+  background: rgba(145, 178, 205, 0.08);
+  color: var(--muted);
 }
 
 .notification-empty {
@@ -2307,6 +2376,55 @@ body {
     width: 100%;
     justify-content: space-between;
     flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 500px) {
+  .home-topbar,
+  .watch-topbar {
+    flex-wrap: nowrap;
+    gap: 0.45rem;
+    padding: 0.4rem 0.65rem;
+  }
+
+  .home-logo {
+    flex: 0 0 auto;
+    font-size: 1.35rem;
+  }
+
+  .home-nav,
+  .watch-nav {
+    width: auto;
+    flex: 0 1 auto;
+    gap: 0.45rem;
+    padding: 0;
+  }
+
+  .home-nav a,
+  .watch-nav a {
+    padding: 0.26rem 0.45rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .nav-search {
+    order: initial;
+    flex: 0 1 190px;
+    min-width: 135px;
+  }
+
+  .header-actions,
+  .watch-top-actions {
+    width: auto;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+
+  .nav-search-btn,
+  .icon-pill,
+  .account-pill {
+    min-height: 34px;
   }
 }
 

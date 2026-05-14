@@ -3,11 +3,12 @@ import {
   fetchCountryOptions,
   fetchTitlesByGenre,
   fetchTitlesByCountry
-} from "./catalog.js?v=20260508-toggle1";
-import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
-import { initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
-import { buildWatchHref, escapeHtml, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
+} from "./catalog.js?v=20260513-fixes1";
+import { initSharedHeader } from "./shared-ui.js?v=20260513-fixes1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
+import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
+import { ensureSession } from "./auth-client.js";
+import { buildResumableWatchHref, escapeHtml, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260513-fixes1";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = { valueMax: 12, nameMax: 40 };
@@ -18,6 +19,7 @@ let mediaType = query.get("type") === "tv" ? "tv" : "movie";
 let selectedValue = sanitizeText(query.get("value"), INPUT_LIMITS.valueMax);
 let selectedName = sanitizeText(query.get("name"), INPUT_LIMITS.nameMax);
 let page = Math.max(1, Number(query.get("page") || 1));
+let activeProgress = {};
 
 const el = {
   browseOptionsGrid: document.getElementById("browseOptionsGrid"),
@@ -37,6 +39,7 @@ const el = {
 const state = {
   options: [],
   data: null,
+  genreFallbackReason: "",
   genreOptions: { movie: [], tv: [] },
   genreIndex: {
     byKey: new Map(),
@@ -50,6 +53,7 @@ boot();
 async function boot() {
   initSharedHeader();
   initConfiguredTmdb();
+  activeProgress = await loadActiveProgress();
 
 
   if (!selectedValue) {
@@ -221,6 +225,7 @@ function updateBrowseUrl() {
 
 function renderBrowseResults() {
   if (!state.data) return;
+  renderGenreFallbackNote();
   if (mediaType === "movie") {
     renderPosterCards(el.browseMoviesGrid, state.data.movies || []);
     el.browseMoviesSection?.toggleAttribute("hidden", false);
@@ -230,6 +235,15 @@ function renderBrowseResults() {
     el.browseTvSection?.toggleAttribute("hidden", false);
     el.browseMoviesSection?.toggleAttribute("hidden", true);
   }
+}
+
+function renderGenreFallbackNote() {
+  document.querySelector(".genre-fallback-note")?.remove();
+  if (!state.genreFallbackReason) return;
+  const note = document.createElement("p");
+  note.className = "genre-fallback-note tiny muted";
+  note.textContent = state.genreFallbackReason;
+  el.browseTitle?.closest(".home-row")?.appendChild(note);
 }
 
 async function ensureGenreOptions() {
@@ -301,23 +315,6 @@ function genreBigramSimilarity(a, b) {
   return (2 * shared) / (leftSet.size + rightSet.size);
 }
 
-function bestGenreMatch(list, name) {
-  const sourceTokens = genreTokens(name);
-  let best = null;
-  let bestScore = 0;
-  (list || []).forEach((entry) => {
-    const targetTokens = genreTokens(entry.name);
-    const overlap = sourceTokens.filter((token) => targetTokens.includes(token)).length;
-    const similarity = genreBigramSimilarity(name, entry.name);
-    const score = overlap * 2 + similarity;
-    if (score > bestScore) {
-      bestScore = score;
-      best = entry;
-    }
-  });
-  return bestScore > 0 ? best : null;
-}
-
 function findGenreByName(list, name) {
   const key = normalizeGenreKey(name);
   return (list || []).find((entry) => normalizeGenreKey(entry.name) === key) || null;
@@ -333,36 +330,7 @@ function mapGenreId(targetType) {
     sourceName = current?.name || "";
   }
   if (!sourceName) return null;
-  let mapped = findGenreByName(targetList, sourceName);
-  if (!mapped) {
-    const normalized = normalizeGenreKey(sourceName);
-    const aliasMap = {
-      "action and adventure": ["Action", "Adventure"],
-      "war and politics": ["War", "Politics"],
-      "sci fi and fantasy": ["Science Fiction", "Fantasy"],
-      "science fiction": ["Sci-Fi & Fantasy"],
-      "fantasy": ["Sci-Fi & Fantasy"],
-      "action": ["Action & Adventure"],
-      "adventure": ["Action & Adventure"],
-      "war": ["War & Politics"],
-      "politics": ["War & Politics"]
-    };
-    const aliases = aliasMap[normalized] || [];
-    mapped = aliases.map((alias) => findGenreByName(targetList, alias)).find(Boolean) || null;
-  }
-  if (!mapped) {
-    const normalized = normalizeGenreKey(sourceName);
-    if (targetType === "movie" && normalized.includes("sci fi") && normalized.includes("fantasy")) {
-      mapped = findGenreByName(targetList, "Science Fiction") || findGenreByName(targetList, "Fantasy");
-    }
-    if (targetType === "tv" && (normalized === "science fiction" || normalized === "fantasy")) {
-      mapped = findGenreByName(targetList, "Sci-Fi & Fantasy");
-    }
-    if (!mapped) {
-      mapped = bestGenreMatch(targetList, sourceName);
-    }
-  }
-  return mapped;
+  return findGenreByName(targetList, sourceName);
 }
 
 function updateTypeToggleVisibility() {
@@ -419,9 +387,69 @@ function getSourcePageWindow(pageNumber) {
 }
 
 function fetchBrowseSourcePage(sourcePage) {
-  return mode === "country"
-    ? fetchTitlesByCountry(selectedValue, sourcePage)
-    : fetchTitlesByGenre(Number(selectedValue), sourcePage);
+  if (mode === "country") return fetchTitlesByCountry(selectedValue, sourcePage);
+  state.genreFallbackReason = "";
+  const request = buildSelectedGenreRequest();
+  return fetchTitlesByGenre(null, sourcePage, request);
+}
+
+function buildSelectedGenreRequest() {
+  const name = selectedName || findSelectedGenreName();
+  const key = normalizeGenreKey(name);
+  const indexed = key ? state.genreIndex.byKey.get(key) : null;
+  let movieGenreId = indexed?.movieId || null;
+  let tvGenreId = indexed?.tvId || null;
+
+  if (!movieGenreId && mediaType === "movie") {
+    const selectedMovieKey = state.genreIndex.movieIdToKey.get(String(selectedValue));
+    movieGenreId = selectedMovieKey ? state.genreIndex.byKey.get(selectedMovieKey)?.movieId || null : null;
+  }
+  if (!tvGenreId && mediaType === "tv") {
+    const selectedTvKey = state.genreIndex.tvIdToKey.get(String(selectedValue));
+    tvGenreId = selectedTvKey ? state.genreIndex.byKey.get(selectedTvKey)?.tvId || null : null;
+  }
+  if (!tvGenreId && normalizeGenreKey(name) === "romance") {
+    tvGenreId = 10749;
+  }
+  if (!tvGenreId && normalizeGenreKey(name) === "fantasy") {
+    tvGenreId = 10765;
+  }
+  if (!tvGenreId && normalizeGenreKey(name) === "science fiction") {
+    tvGenreId = 10765;
+  }
+  if (!tvGenreId && normalizeGenreKey(name) === "adventure") {
+    tvGenreId = 10759;
+  }
+  if (!tvGenreId && normalizeGenreKey(name) === "war") {
+    tvGenreId = 10768;
+  }
+  if (!movieGenreId && normalizeGenreKey(name) === "music") {
+    movieGenreId = 10402;
+  }
+  if (!movieGenreId && normalizeGenreKey(name) === "action and adventure") {
+    movieGenreId = "28,12";
+  }
+  if (!movieGenreId && normalizeGenreKey(name) === "sci-fi and fantasy") {
+    movieGenreId = "878,14";
+  }
+  if (!movieGenreId && normalizeGenreKey(name) === "sci fi and fantasy") {
+    movieGenreId = "878,14";
+  }
+  if (!movieGenreId && normalizeGenreKey(name) === "war and politics") {
+    movieGenreId = 10752;
+  }
+
+  return {
+    genreName: name,
+    movieGenreId,
+    tvGenreId
+  };
+}
+
+function findSelectedGenreName() {
+  const movieKey = state.genreIndex.movieIdToKey.get(String(selectedValue));
+  const tvKey = state.genreIndex.tvIdToKey.get(String(selectedValue));
+  return state.genreIndex.byKey.get(movieKey || tvKey)?.name || "";
 }
 
 function dedupeMediaItems(items) {
@@ -470,7 +498,7 @@ function renderPosterCards(container, items) {
     title.textContent = item.title;
     sub.textContent = [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
 
-    if (link) link.href = buildWatchHref(item.id, item.mediaType);
+    if (link) link.href = buildResumableWatchHref(item, activeProgress);
 
     fragment.appendChild(node);
   });
@@ -478,6 +506,17 @@ function renderPosterCards(container, items) {
   container.appendChild(fragment);
   balancePosterGrid(container);
   initDragScroll();
+}
+
+async function loadActiveProgress() {
+  try {
+    const session = await ensureSession();
+    const progress = readJson(getProgressKey(session), null);
+    if (progress && typeof progress === "object") return progress;
+  } catch {
+    // Fall back to local guest progress.
+  }
+  return readJson(getProgressKey(null), readJson(legacyProgressKey, {})) || {};
 }
 
 function countryFlagMarkup(code) {

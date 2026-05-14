@@ -3,12 +3,13 @@ import {
   titleById,
   posterById,
   isSensitiveCatalogItem
-} from "./catalog.js?v=20260508-toggle1";
+} from "./catalog.js?v=20260513-fixes1";
 import { ensureSession } from "./auth-client.js";
-import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
-import { getBookmarksKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260508-toggle1";
-import { buildWatchHref, formatSeconds, readJson, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
+import { deleteBookmarkFromCloud, pushBookmarksToCloud, syncBookmarksWithCloud } from "./bookmark-sync.js";
+import { initSharedHeader } from "./shared-ui.js?v=20260513-fixes1";
+import { balancePosterGrid } from "./drag-scroll.js?v=20260513-fixes1";
+import { getBookmarksKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
+import { buildWatchHref, escapeHtml, formatSeconds, getLatestProgressEntry, normalizePlaybackTimestamp, readJson, setPosterImage } from "./shared-utils.js?v=20260513-fixes1";
 
 const query = new URLSearchParams(window.location.search);
 
@@ -50,6 +51,7 @@ async function boot() {
 }
 
 async function renderBookmarksPage() {
+  const progress = readJson(getProgressKey(state.session), readJson(legacyProgressKey, {})) || {};
   const bookmarks = Object.values(readJson(getBookmarksKey(state.session), {}))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
@@ -62,7 +64,7 @@ async function renderBookmarksPage() {
     return;
   }
 
-  const hydrated = (await hydrateBookmarks(bookmarks)).filter((item) => !isSensitiveCatalogItem(item));
+  const hydrated = (await hydrateBookmarks(bookmarks, progress)).filter((item) => !isSensitiveCatalogItem(item));
 
   renderList(el.listWatching, hydrated.filter((item) => item.status === "watching"), { allowRemove: true });
   renderList(el.listWatched, hydrated.filter((item) => item.status === "watched"), { allowRemove: true });
@@ -78,7 +80,7 @@ async function renderContinuePage() {
 
   const progress = readJson(getProgressKey(state.session), readJson(legacyProgressKey, {}));
   const entries = dedupeContinueEntries(Object.values(progress || {})
-    .filter((entry) => Number(entry.timestamp || 0) > 8 && Number(entry.progress || 0) < 98));
+    .filter((entry) => normalizePlaybackTimestamp(entry.timestamp, entry.duration) > 8 && Number(entry.progress || 0) < 98));
 
   if (!entries.length) {
     el.bookmarksStatus.textContent = "No continue watching titles yet.";
@@ -95,20 +97,32 @@ async function renderContinuePage() {
 async function initAuth() {
   try {
     state.session = await ensureSession();
+    if (state.session?.user) {
+      const key = getBookmarksKey(state.session);
+      const bookmarks = readJson(key, {});
+      const synced = await syncBookmarksWithCloud(state.session, bookmarks);
+      localStorage.setItem(key, JSON.stringify(synced));
+    }
   } catch {
     state.session = null;
   }
 }
 
-async function hydrateBookmarks(bookmarks) {
+async function hydrateBookmarks(bookmarks, progress = {}) {
   const fallback = bookmarks.map((entry) => ({
     id: Number(entry.id),
     mediaType: entry.mediaType === "tv" ? "tv" : "movie",
     status: entry.status,
     title: entry.title || titleById(entry.id, entry.mediaType) || `Title ${entry.id}`,
     poster: entry.poster || posterById(entry.id, entry.mediaType) || "",
-    year: ""
+    year: "",
+    progressEntry: getLatestProgressEntry(progress, entry.id, entry.mediaType)
   }));
+  fallback.forEach((entry) => {
+    entry.season = entry.progressEntry?.season || 1;
+    entry.episode = entry.progressEntry?.episode || 1;
+    entry.resumeAvailable = Boolean(entry.progressEntry);
+  });
 
   try {
     const apiItems = await fetchItemsByIds(fallback);
@@ -120,7 +134,10 @@ async function hydrateBookmarks(bookmarks) {
         ...entry,
         title: apiItem?.title || entry.title,
         poster: apiItem?.poster || entry.poster,
-        year: apiItem?.year || ""
+        year: apiItem?.year || "",
+        season: entry.progressEntry?.season || entry.season || 1,
+        episode: entry.progressEntry?.episode || entry.episode || 1,
+        resumeAvailable: Boolean(entry.progressEntry)
       };
     });
   } catch {
@@ -138,10 +155,10 @@ async function hydrateProgressEntries(entries) {
     poster: entry.poster || posterById(entry.id, entry.mediaType) || "",
     year: "",
     progressPercent: Math.max(0, Math.min(100, Number(entry.progress || 0))),
-    resumeSeconds: Number(entry.timestamp || 0),
+    resumeSeconds: normalizePlaybackTimestamp(entry.timestamp, entry.duration),
     progressMeta: entry.mediaType === "tv"
-      ? `S${entry.season || 1} E${entry.episode || 1} | ${formatSeconds(entry.timestamp)}`
-      : `${Math.round(Number(entry.progress || 0))}% | ${formatSeconds(entry.timestamp)}`
+      ? `S${entry.season || 1} E${entry.episode || 1} | ${formatSeconds(normalizePlaybackTimestamp(entry.timestamp, entry.duration))}`
+      : `${Math.round(Number(entry.progress || 0))}% | ${formatSeconds(normalizePlaybackTimestamp(entry.timestamp, entry.duration))}`
   }));
 
   try {
@@ -195,6 +212,30 @@ function renderList(container, entries, options = {}) {
     }
 
     if (options.allowRemove) {
+      const switcher = document.createElement("label");
+      switcher.className = "bookmark-switch-control";
+      switcher.setAttribute("aria-label", `Move ${item.title} to another list`);
+      switcher.innerHTML = `
+        <span class="bookmark-switch-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M6 4h12v16l-6-4-6 4z"/></svg>
+        </span>
+        <select class="bookmark-switch-select">
+          ${bookmarkStatuses().map((entry) => (
+            `<option value="${entry.value}"${entry.value === item.status ? " selected" : ""}>${escapeHtml(entry.label)}</option>`
+          )).join("")}
+        </select>
+      `;
+      const select = switcher.querySelector("select");
+      select?.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      select?.addEventListener("change", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        moveBookmarkEntry(item.mediaType, item.id, select.value);
+      });
+      node.appendChild(switcher);
+
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "continue-remove-btn";
@@ -208,7 +249,7 @@ function renderList(container, entries, options = {}) {
       node.appendChild(removeBtn);
     }
 
-    const href = buildWatchHref(item.id, item.mediaType, item.season, item.episode, options.resume);
+    const href = buildWatchHref(item.id, item.mediaType, item.season, item.episode, options.resume || item.resumeAvailable);
     if (link) link.href = href;
 
     fragment.appendChild(node);
@@ -216,7 +257,30 @@ function renderList(container, entries, options = {}) {
 
   container.appendChild(fragment);
   balancePosterGrid(container);
-  initDragScroll();
+}
+
+function bookmarkStatuses() {
+  return [
+    { value: "watching", label: "Watching" },
+    { value: "watched", label: "Watched" },
+    { value: "plan", label: "Plan" },
+    { value: "dropped", label: "Dropped" }
+  ];
+}
+
+function moveBookmarkEntry(mediaType, id, status) {
+  const normalizedStatus = bookmarkStatuses().some((entry) => entry.value === status) ? status : "watching";
+  const key = `${mediaType === "tv" ? "tv" : "movie"}:${Number(id)}`;
+  const bookmarks = readJson(getBookmarksKey(state.session), {});
+  if (!bookmarks?.[key]) return;
+  bookmarks[key] = {
+    ...bookmarks[key],
+    status: normalizedStatus,
+    updatedAt: Date.now()
+  };
+  localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(bookmarks));
+  void pushBookmarksToCloud(state.session, bookmarks);
+  void renderBookmarksPage();
 }
 
 function removeBookmarkEntry(mediaType, id) {
@@ -225,6 +289,7 @@ function removeBookmarkEntry(mediaType, id) {
   if (!bookmarks?.[key]) return;
   delete bookmarks[key];
   localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(bookmarks));
+  void deleteBookmarkFromCloud(state.session, mediaType, id);
   void renderBookmarksPage();
 }
 

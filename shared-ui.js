@@ -1,8 +1,8 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession, setStoredSession } from "./auth-client.js";
-import { initHeaderNotifications } from "./notifications.js?v=20260508-toggle1";
-import { searchCatalog } from "./catalog.js?v=20260508-toggle1";
-import { initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
-import { buildWatchHref, debounce, escapeHtml, readJson, sanitizeText } from "./shared-utils.js?v=20260508-toggle1";
+import { initHeaderNotifications } from "./notifications.js?v=20260513-fixes1";
+import { searchCatalog } from "./catalog.js?v=20260513-fixes1";
+import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
+import { buildResumableWatchHref, buildWatchHref, debounce, escapeHtml, readJson, sanitizeText } from "./shared-utils.js?v=20260513-fixes1";
 import { showToast } from "./ui-toast.js";
 
 const avatarOptions = [
@@ -32,6 +32,7 @@ export function initSharedHeader() {
   const signOut = document.getElementById("signOutMenuBtn");
   const notificationsWrap = document.getElementById("notificationsWrap");
   let currentSession = null;
+  let currentProgress = readJson(getProgressKey(null), readJson(legacyProgressKey, {})) || {};
 
   sharedHeaderRefs.avatar = avatar;
   sharedHeaderRefs.label = label;
@@ -42,13 +43,14 @@ export function initSharedHeader() {
   const headerActions = ensureHeaderActionsGroup();
   const bookmarksLink = ensureBookmarksLink(headerActions || notificationsWrap || accountWrap);
 
-  initSharedNavSearch();
+  initSharedNavSearch({ getProgress: () => currentProgress });
   initSharedFooterReport(() => currentSession);
   renderSharedAccount(avatar, label, null);
   updateBookmarksLink(bookmarksLink, null);
 
   ensureSession().then((session) => {
     currentSession = session;
+    currentProgress = readJson(getProgressKey(session), {}) || {};
     renderSharedAccount(avatar, label, session);
     updateBookmarksLink(bookmarksLink, session);
   }).catch(() => {
@@ -58,6 +60,7 @@ export function initSharedHeader() {
   });
   window.addEventListener("cinerune:session-updated", (event) => {
     currentSession = event.detail || null;
+    currentProgress = readJson(getProgressKey(currentSession), {}) || {};
     renderSharedAccount(avatar, label, currentSession);
     updateBookmarksLink(bookmarksLink, currentSession);
     notificationsWrap?.toggleAttribute("hidden", !currentSession?.user);
@@ -85,9 +88,11 @@ export function initSharedHeader() {
     if (hidden) {
       accountMenu.removeAttribute("hidden");
       accountBtn.classList.add("active");
+      updateMenuScrimVisibility();
     } else {
       accountMenu.setAttribute("hidden", "");
       accountBtn.classList.remove("active");
+      updateMenuScrimVisibility();
     }
   });
 
@@ -103,10 +108,47 @@ export function initSharedHeader() {
     if (accountWrap && !accountWrap.contains(event.target)) {
       accountMenu?.setAttribute("hidden", "");
       accountBtn?.classList.remove("active");
+      updateMenuScrimVisibility();
     }
   });
 
   initHeaderNotifications();
+}
+
+function getMenuScrim() {
+  let scrim = document.getElementById("menuScrim");
+  if (!scrim) {
+    scrim = document.createElement("div");
+    scrim.id = "menuScrim";
+    scrim.className = "menu-scrim";
+    scrim.setAttribute("hidden", "");
+    document.body.appendChild(scrim);
+  }
+  if (scrim.dataset.scrimReady !== "1") {
+    scrim.dataset.scrimReady = "1";
+    scrim.addEventListener("click", () => {
+      const accountMenu = document.getElementById("accountMenu");
+      const accountBtn = document.getElementById("toggleAuth");
+      accountMenu?.setAttribute("hidden", "");
+      accountBtn?.classList.remove("active");
+      const notificationsMenu = document.getElementById("notificationsMenu");
+      const notificationsBtn = document.getElementById("notificationsBtn");
+      notificationsMenu?.setAttribute("hidden", "");
+      notificationsBtn?.setAttribute("aria-expanded", "false");
+      updateMenuScrimVisibility();
+    });
+  }
+  return scrim;
+}
+
+function updateMenuScrimVisibility() {
+  const scrim = getMenuScrim();
+  const accountMenu = document.getElementById("accountMenu");
+  const notificationsMenu = document.getElementById("notificationsMenu");
+  const menusOpen = [accountMenu, notificationsMenu]
+    .some((menu) => menu && !menu.hasAttribute("hidden"));
+  const shouldShowScrim = menusOpen && window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+  scrim.toggleAttribute("hidden", !shouldShowScrim);
 }
 
 const sharedAuthState = {
@@ -1372,10 +1414,9 @@ export function initSharedNavSearch(options = {}) {
     try {
       const result = await searchCatalog(term, { page: 1 });
       const items = result.all || [...(result.movies || []), ...(result.tv || [])];
-      const activeTerm = result.correctedQuery || result.query || term;
-      const ranked = rankFuzzyResults(activeTerm, items);
-      renderSharedSearchSuggestions(suggestions, ranked, activeTerm);
-      options.onResults?.(result, activeTerm);
+      const ranked = rankFuzzyResults(term, items);
+      renderSharedSearchSuggestions(suggestions, ranked, term, options.getProgress?.() || {});
+      options.onResults?.(result, term);
     } catch {
       hideSharedSearchSuggestions(suggestions);
       options.onError?.();
@@ -1467,7 +1508,7 @@ function renderSharedRecentSearches(container) {
   container.removeAttribute("hidden");
 }
 
-function renderSharedSearchSuggestions(container, items, term) {
+function renderSharedSearchSuggestions(container, items, term, progress = {}) {
   const top = (items || []).slice(0, 8);
   const cleanTerm = sanitizeText(term, 80);
   if (!top.length && !cleanTerm) {
@@ -1479,7 +1520,7 @@ function renderSharedSearchSuggestions(container, items, term) {
     const type = item.mediaType === "movie" ? "Movie" : "TV";
     const subtitle = [type, item.year].filter(Boolean).join(" | ");
     return `
-      <a class="search-suggestion" href="${escapeHtml(buildWatchHref(item.id, item.mediaType))}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.mediaType)}" style="animation-delay:${index * 35}ms">
+      <a class="search-suggestion" href="${escapeHtml(buildResumableWatchHref(item, progress))}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.mediaType)}" style="animation-delay:${index * 35}ms">
         <img class="search-suggestion-poster" src="${escapeHtml(item.poster || "")}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" />
         <span>
           <span class="search-suggestion-title">${escapeHtml(item.title)}</span>
@@ -1508,31 +1549,18 @@ function buildSearchHref(term) {
 }
 
 function rankFuzzyResults(query, items) {
-  const normalizedQuery = normalizeSearchQuery(query);
-  if (!normalizedQuery) return items || [];
-
-  const scored = (items || []).map((item, index) => {
-    const normalizedTitle = normalizeSearchQuery(item.title);
-    const score = fuzzyScore(normalizedQuery, normalizedTitle);
-    return { item, index, score };
+  const FuseCtor = window.Fuse;
+  if (!FuseCtor || !String(query || "").trim() || !Array.isArray(items) || items.length < 2) return items || [];
+  const fuse = new FuseCtor(items, {
+    keys: ["title", "name"],
+    threshold: 0.4,
+    ignoreLocation: true,
+    minMatchCharLength: 2
   });
-
-  const hasSignal = scored.some((entry) => entry.score > 0);
-  if (!hasSignal) return items || [];
-
-  return scored
-    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
-    .map((entry) => entry.item);
-}
-
-function fuzzyScore(query, title) {
-  if (!query || !title) return 0;
-  if (title === query) return 10000;
-  if (title.startsWith(query)) return 8000;
-  if (title.includes(query)) return 5000;
-  const distance = levenshteinDistance(query, title);
-  if (distance <= 2) return 2000 - (distance * 500);
-  return 0;
+  const ranked = fuse.search(query).map((entry) => entry.item);
+  if (!ranked.length) return items || [];
+  const rankedKeys = new Set(ranked.map((item) => `${item.mediaType}:${item.id}`));
+  return [...ranked, ...items.filter((item) => !rankedKeys.has(`${item.mediaType}:${item.id}`))];
 }
 
 function normalizeSearchQuery(value) {
@@ -1542,34 +1570,6 @@ function normalizeSearchQuery(value) {
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function levenshteinDistance(a, b) {
-  const s = String(a || "");
-  const t = String(b || "");
-  if (s === t) return 0;
-  if (!s) return t.length;
-  if (!t) return s.length;
-
-  const rows = s.length + 1;
-  const cols = t.length + 1;
-  const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
-
-  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
-  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
-
-  for (let i = 1; i < rows; i += 1) {
-    for (let j = 1; j < cols; j += 1) {
-      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + cost
-      );
-    }
-  }
-
-  return dp[rows - 1][cols - 1];
 }
 
 function hideSharedSearchSuggestions(container) {

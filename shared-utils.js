@@ -22,6 +22,20 @@ export function readJson(key, fallback) {
   }
 }
 
+export function normalizePlaybackTimestamp(value, duration = 0) {
+  const timestamp = Math.floor(Number(value || 0));
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return 0;
+
+  const runtime = Math.floor(Number(duration || 0));
+  if (runtime > 0) {
+    return timestamp <= runtime + 60 ? Math.max(0, timestamp) : 0;
+  }
+
+  // Playback positions should be seconds. Epoch millisecond values from embeds
+  // are far larger and create impossible resume times in Continue Watching.
+  return timestamp <= 24 * 60 * 60 ? timestamp : 0;
+}
+
 export function buildWatchHref(id, mediaType, season = 1, episode = 1, resume = false) {
   const url = new URL("./watch.html", window.location.href);
   url.searchParams.set("id", String(id));
@@ -34,6 +48,29 @@ export function buildWatchHref(id, mediaType, season = 1, episode = 1, resume = 
     url.searchParams.set("resume", "1");
   }
   return url.toString();
+}
+
+export function getLatestProgressEntry(progress, id, mediaType) {
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  const normalizedId = Number(id || 0);
+  if (!normalizedId || !progress || typeof progress !== "object") return null;
+
+  return Object.values(progress)
+    .filter((entry) => (
+      entry?.mediaType === normalizedType
+      && Number(entry?.id || 0) === normalizedId
+      && normalizePlaybackTimestamp(entry?.timestamp, entry?.duration) > 8
+      && Number(entry?.progress || 0) < 98
+    ))
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0] || null;
+}
+
+export function buildResumableWatchHref(item, progress, fallbackResume = false) {
+  const mediaType = item?.mediaType === "tv" ? "tv" : "movie";
+  const latest = getLatestProgressEntry(progress, item?.id, mediaType);
+  const season = latest?.season || item?.season || item?.defaultSeason || 1;
+  const episode = latest?.episode || item?.episode || item?.defaultEpisode || 1;
+  return buildWatchHref(item?.id, mediaType, season, episode, Boolean(latest) || fallbackResume);
 }
 
 export function formatSeconds(value) {

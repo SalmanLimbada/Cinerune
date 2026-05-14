@@ -1,16 +1,18 @@
 import {
   searchCatalog
-} from "./catalog.js?v=20260508-toggle1";
-import { initSharedHeader, saveSharedRecentSearch } from "./shared-ui.js?v=20260508-toggle1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
-import { initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
-import { buildWatchHref, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
+} from "./catalog.js?v=20260513-fixes1";
+import { initSharedHeader, saveSharedRecentSearch } from "./shared-ui.js?v=20260513-fixes1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
+import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
+import { ensureSession } from "./auth-client.js";
+import { buildResumableWatchHref, sanitizeText, setPosterImage, readJson } from "./shared-utils.js?v=20260513-fixes1";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = {
   searchMax: 80
 };
 const page = Math.max(1, Number(query.get("page") || 1));
+let activeProgress = {};
 
 const el = {
   searchPageTitle: document.getElementById("searchPageTitle"),
@@ -26,6 +28,7 @@ boot();
 async function boot() {
   initSharedHeader();
   initConfiguredTmdb();
+  activeProgress = await loadActiveProgress();
 
   const term = sanitizeText(query.get("q"), INPUT_LIMITS.searchMax);
   el.searchPageInput.value = term;
@@ -56,24 +59,15 @@ async function boot() {
   el.searchPageStatus.textContent = "Loading results...";
 
   try {
-    let result = await searchCatalog(term, { page, pages: 4 });
+    const result = await searchCatalog(term, { page, pages: 4 });
     let items = result.all || [...(result.movies || []), ...(result.tv || [])];
-    let activeTerm = result.correctedQuery || result.query || term;
-    const correctedTerm = result.correctedQuery ? "" : getCorrectedTerm(term, items);
-
-    if (correctedTerm && normalizeSearchQuery(correctedTerm) !== normalizeSearchQuery(term)) {
-      activeTerm = correctedTerm;
-      result = await searchCatalog(correctedTerm, { page, pages: 4 });
-      items = result.all || [...(result.movies || []), ...(result.tv || [])];
-    }
-
-    const ranked = rankFuzzyResults(activeTerm, items);
+    const ranked = rankFuzzyResults(term, items);
     renderPosterCards(ranked);
-    renderPagination(activeTerm, page, result.totalPages || 1);
-    el.searchPageTitle.textContent = `Search: ${activeTerm}`;
+    renderPagination(term, page, result.totalPages || 1);
+    el.searchPageTitle.textContent = `Search: ${term}`;
     el.searchPageStatus.textContent = ranked.length
-      ? `Page ${page} of ${Math.max(1, Number(result.totalPages || 1))} for "${activeTerm}".`
-      : `No results found for "${activeTerm}".`;
+      ? `Page ${page} of ${Math.max(1, Number(result.totalPages || 1))} for "${term}".`
+      : `No results found for "${term}".`;
   } catch {
     renderPosterCards([]);
     renderPagination(term, 1, 1);
@@ -99,7 +93,7 @@ function renderPosterCards(items) {
     title.textContent = item.title;
     sub.textContent = [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
 
-    if (link) link.href = buildWatchHref(item.id, item.mediaType);
+    if (link) link.href = buildResumableWatchHref(item, activeProgress);
 
     fragment.appendChild(node);
   });
@@ -110,95 +104,29 @@ function renderPosterCards(items) {
 }
 
 function rankFuzzyResults(query, items) {
-  const normalizedQuery = normalizeSearchQuery(query);
-  if (!normalizedQuery) return items || [];
-
-  const scored = (items || []).map((item, index) => {
-    const normalizedTitle = normalizeSearchQuery(item.title);
-    const score = fuzzyScore(normalizedQuery, normalizedTitle);
-    return { item, index, score };
+  const FuseCtor = window.Fuse;
+  if (!FuseCtor || !String(query || "").trim() || !Array.isArray(items) || items.length < 2) return items || [];
+  const fuse = new FuseCtor(items, {
+    keys: ["title", "name"],
+    threshold: 0.4,
+    ignoreLocation: true,
+    minMatchCharLength: 2
   });
-
-  const hasSignal = scored.some((entry) => entry.score > 0);
-  if (!hasSignal) return items || [];
-
-  return scored
-    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
-    .map((entry) => entry.item);
+  const ranked = fuse.search(query).map((entry) => entry.item);
+  if (!ranked.length) return items || [];
+  const rankedKeys = new Set(ranked.map((item) => `${item.mediaType}:${item.id}`));
+  return [...ranked, ...items.filter((item) => !rankedKeys.has(`${item.mediaType}:${item.id}`))];
 }
 
-function getCorrectedTerm(query, items) {
-  const normalizedQuery = normalizeSearchQuery(query);
-  if (!normalizedQuery) return "";
-
-  let best = null;
-  let bestScore = 0;
-
-  (items || []).forEach((item) => {
-    const title = String(item.title || "").trim();
-    if (!title) return;
-    const normalizedTitle = normalizeSearchQuery(title);
-    if (!normalizedTitle) return;
-    const score = fuzzyScore(normalizedQuery, normalizedTitle);
-    if (score > bestScore) {
-      bestScore = score;
-      best = title;
-    }
-  });
-
-  if (!best || bestScore < 1000) return "";
-
-  const distance = levenshteinDistance(normalizeSearchQuery(query), normalizeSearchQuery(best));
-  if (distance > 2) return "";
-  if (best.length > query.length + 2) return "";
-  return best;
-}
-
-function fuzzyScore(query, title) {
-  if (!query || !title) return 0;
-  if (title === query) return 10000;
-  if (title.startsWith(query)) return 8000;
-  if (title.includes(query)) return 5000;
-  const distance = levenshteinDistance(query, title);
-  if (distance <= 2) return 2000 - (distance * 500);
-  return 0;
-}
-
-function normalizeSearchQuery(value) {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function levenshteinDistance(a, b) {
-  const s = String(a || "");
-  const t = String(b || "");
-  if (s === t) return 0;
-  if (!s) return t.length;
-  if (!t) return s.length;
-
-  const rows = s.length + 1;
-  const cols = t.length + 1;
-  const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
-
-  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
-  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
-
-  for (let i = 1; i < rows; i += 1) {
-    for (let j = 1; j < cols; j += 1) {
-      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + cost
-      );
-    }
+async function loadActiveProgress() {
+  try {
+    const session = await ensureSession();
+    const progress = readJson(getProgressKey(session), null);
+    if (progress && typeof progress === "object") return progress;
+  } catch {
+    // Use guest progress below when auth is unavailable.
   }
-
-  return dp[rows - 1][cols - 1];
+  return readJson(getProgressKey(null), readJson(legacyProgressKey, {})) || {};
 }
 
 function renderPagination(term, current, totalPages) {

@@ -15,6 +15,7 @@ const genreCache = {
 let countryCache = null;
 const searchCache = new Map();
 const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
+const SEASON_EPISODE_CACHE_TTL_MS = 10 * 60 * 1000;
 
 const sensitiveExactTitles = new Set([
   "overflow"
@@ -106,9 +107,12 @@ export async function episodeCount(tvId, season) {
   return episodes.length || 0;
 }
 
-export async function fetchSeasonEpisodes(tvId, season) {
+export async function fetchSeasonEpisodes(tvId, season, options = {}) {
   const key = `${Number(tvId)}:${Number(season)}`;
-  if (seasonEpisodeCache.has(key)) return seasonEpisodeCache.get(key);
+  const cached = seasonEpisodeCache.get(key);
+  if (!options.forceRefresh && cached && Date.now() - Number(cached.timestamp || 0) < SEASON_EPISODE_CACHE_TTL_MS) {
+    return cached.episodes;
+  }
 
   try {
     const data = await tmdbRequest(`/tv/${Number(tvId)}/season/${Number(season)}`);
@@ -119,20 +123,21 @@ export async function fetchSeasonEpisodes(tvId, season) {
         airDate: String(episode?.air_date || "").trim()
       }))
       .filter((episode) => episode.episodeNumber > 0 && isReleasedAirDate(episode.airDate));
-    seasonEpisodeCache.set(key, episodes);
+    seasonEpisodeCache.set(key, { episodes, timestamp: Date.now() });
     return episodes;
   } catch {
-    return [];
+    return cached?.episodes || [];
   }
 }
 
 export async function fetchHomeCatalog() {
   const randomPage = 1 + Math.floor(Math.random() * 5);
-  const [trendingMovieResult, trendingTvResult, popularMovieResult, popularTvResult] = await Promise.allSettled([
+  const [trendingMovieResult, trendingTvResult, popularMovieResult, popularTvResult, airingTodayResult] = await Promise.allSettled([
     tmdbRequest("/trending/movie/week", { page: randomPage }),
     tmdbRequest("/trending/tv/week", { page: randomPage }),
     tmdbRequest("/movie/popular", { page: randomPage }),
-    tmdbRequest("/tv/popular", { page: randomPage })
+    tmdbRequest("/tv/popular", { page: randomPage }),
+    tmdbRequest("/tv/airing_today", { page: randomPage })
   ]);
 
   const trendingMovies = trendingMovieResult.status === "fulfilled"
@@ -147,6 +152,9 @@ export async function fetchHomeCatalog() {
     : [];
   const popularTv = popularTvResult.status === "fulfilled"
     ? normalizeList(popularTvResult.value.results || [])
+    : [];
+  const airingTodayRaw = airingTodayResult.status === "fulfilled"
+    ? normalizeList(airingTodayResult.value.results || [])
     : [];
 
   const trendingRaw = dedupeByKey([...trendingMovies, ...trendingTv]);
@@ -165,6 +173,10 @@ export async function fetchHomeCatalog() {
     ? popularRaw
     : recommended.slice(0, 24);
 
+  const airingToday = airingTodayRaw.length
+    ? airingTodayRaw
+    : trendingTv.slice(0, 24);
+
   const hero = trending.find((item) => item.backdrop && item.poster)
     || popular.find((item) => item.backdrop && item.poster)
     || trending[0]
@@ -172,7 +184,7 @@ export async function fetchHomeCatalog() {
     || recommended[0]
     || null;
 
-  const combined = [...recommended, ...trending, ...popular, ...(hero ? [hero] : [])];
+  const combined = [...recommended, ...trending, ...popular, ...airingToday, ...(hero ? [hero] : [])];
   cacheItems(combined);
 
   catalog = dedupeByKey(combined);
@@ -181,7 +193,8 @@ export async function fetchHomeCatalog() {
     hero,
     recommended,
     trending,
-    popular
+    popular,
+    airingToday
   };
 }
 
@@ -297,23 +310,26 @@ export async function fetchCountryOptions() {
   return countries;
 }
 
-export async function fetchTitlesByGenre(genreId, page = 1) {
-  const genre = Number(genreId || 0);
-  if (!genre) return { movies: [], tv: [], page: 1, totalPages: 1 };
+export async function fetchTitlesByGenre(genreId, page = 1, options = {}) {
+  const genreName = String(options.genreName || "").trim();
+  const normalizedGenreName = normalizeKeywordQuery(genreName);
+  const fallbackGenre = Number(genreId || 0) || null;
+  const movieGenre = Number(options.movieGenreId || fallbackGenre || 0) || null;
+  const tvGenre = Number(options.tvGenreId || fallbackGenre || 0) || null;
+  const movieKeywordIds = !movieGenre ? getHardcodedKeywordIds(normalizedGenreName) : [];
+  const tvKeywordIds = !tvGenre ? getHardcodedKeywordIds(normalizedGenreName) : [];
 
   const [movieData, tvData] = await Promise.all([
-    tmdbRequest("/discover/movie", {
-      with_genres: genre,
-      include_adult: "false",
-      sort_by: "popularity.desc",
-      page
-    }),
-    tmdbRequest("/discover/tv", {
-      with_genres: genre,
-      include_adult: "false",
-      sort_by: "popularity.desc",
-      page
-    })
+    movieGenre
+      ? fetchGenreDiscovery("movie", movieGenre, [], genreName, page)
+      : movieKeywordIds.length
+        ? fetchGenreDiscovery("movie", null, movieKeywordIds, genreName, page)
+        : tmdbRequest("/trending/movie/week", { page }),
+    tvGenre
+      ? fetchGenreDiscovery("tv", tvGenre, [], genreName, page)
+      : tvKeywordIds.length
+        ? fetchGenreDiscovery("tv", null, tvKeywordIds, genreName, page)
+        : tmdbRequest("/trending/tv/week", { page })
   ]);
 
   const movies = normalizeList(movieData.results || []);
@@ -324,6 +340,65 @@ export async function fetchTitlesByGenre(genreId, page = 1) {
   );
   cacheItems([...movies, ...tv]);
   return { movies, tv, page, totalPages };
+}
+
+async function fetchGenreDiscovery(mediaType, genreId, keywordIds, genreName, page) {
+  const path = mediaType === "tv" ? "/discover/tv" : "/discover/movie";
+  const params = {
+    include_adult: "false",
+    sort_by: "popularity.desc",
+    page
+  };
+  const normalizedGenreName = normalizeKeywordQuery(genreName);
+  if (genreId) {
+    params.with_genres = genreId;
+  } else if (keywordIds.length) {
+    params.with_keywords = keywordIds.join("|");
+    if (mediaType === "movie") {
+      const kidKeywordIds = new Set([339426, 259345, 350422]);
+      if (keywordIds.some((id) => kidKeywordIds.has(Number(id)))) {
+        params.with_genres = 10751;
+      }
+    }
+  }
+  if (mediaType === "tv" && normalizedGenreName === "romance") {
+    params.with_original_language = "en|ko|ja|fr|es";
+  }
+  return tmdbRequest(path, params);
+}
+
+function normalizeKeywordQuery(value) {
+  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function getHardcodedKeywordIds(normalizedGenreName) {
+  const hardcodedKeywordIds = {
+    "news": [191509, 157384, 162502, 222176],
+    "talk show": [3741, 368829, 274424, 331812],
+    "talk": [3741, 368829, 274424, 331812],
+    "soap": [291959, 287219, 328077],
+    "kids": [208349, 339426, 259345, 350422],
+    "music": [4344, 355890, 155710, 220201, 165241, 240462, 286529],
+    "reality": [287029, 250845, 275693, 281051],
+    "horror": [315058, 50009, 178647, 351957],
+    "history": [282633, 239635, 15012, 5647, 159862],
+    "thriller": [316362, 12565, 226769, 302132, 217282, 298530, 319190]
+  };
+
+  if (!normalizedGenreName) return [];
+  return hardcodedKeywordIds[normalizedGenreName] || [];
+}
+
+export async function fetchTrendingMovies(page = 1) {
+  const data = await tmdbRequest("/trending/movie/week", { page });
+  const movies = normalizeList(data.results || []);
+  cacheItems(movies);
+  return {
+    movies,
+    tv: [],
+    page,
+    totalPages: Number(data.total_pages || 1) || 1
+  };
 }
 
 export async function fetchTitlesByCountry(countryCode, page = 1) {
@@ -439,13 +514,7 @@ export async function fetchGenreSections() {
   ];
 
   const requests = sectionDefs.map(async (section) => {
-    const path = section.mediaType === "movie" ? "/discover/movie" : "/discover/tv";
-    const data = await tmdbRequest(path, {
-      with_genres: section.id,
-      sort_by: "popularity.desc",
-      include_adult: "false",
-      page: 1
-    });
+    const data = await fetchGenreDiscovery(section.mediaType, section.id, [], section.name, 1);
 
     const items = normalizeList(data.results || []).slice(0, 18);
     cacheItems(items);
@@ -475,8 +544,6 @@ export async function searchCatalog(query, options = {}) {
     return cached.result;
   }
 
-  let activeQuery = text;
-  let correctedQuery = "";
   let responses = await searchTmdbPages(text, page, requestedPages);
 
   let normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [], {
@@ -489,37 +556,6 @@ export async function searchCatalog(query, options = {}) {
     normalized = isGenericSensitiveSearchQuery(text)
       ? []
       : normalized.filter((item) => isExactSensitiveSearch(item, text));
-  }
-
-  if (!normalized.length && !sensitiveQuery) {
-    const alternates = buildSearchAlternates(text);
-    if (alternates.length) {
-      const fallbackResponses = await Promise.all(
-        alternates.slice(0, 8).map((alt) => tmdbRequest("/search/multi", {
-          query: alt,
-          include_adult: "false",
-          page
-        }).catch(() => ({ results: [], total_pages: 1 })))
-      );
-      const fallbackNormalized = dedupeByKey(fallbackResponses.flatMap((response) => normalizeList(response.results || [], {
-        allowSensitiveExact: true,
-        query: text
-      })))
-        .sort((a, b) => scoreSearchResult(b, text) - scoreSearchResult(a, text));
-      if (fallbackNormalized.length) {
-        const correction = pickSearchCorrection(text, fallbackNormalized);
-        if (correction) {
-          activeQuery = correction;
-          correctedQuery = correction;
-          responses = await searchTmdbPages(correction, page, requestedPages);
-          normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [], {
-            allowSensitiveExact: true,
-            query: correction
-          })))
-            .sort((a, b) => scoreSearchResult(b, correction) - scoreSearchResult(a, correction));
-        }
-      }
-    }
   }
 
   cacheItems(normalized);
@@ -535,8 +571,8 @@ export async function searchCatalog(query, options = {}) {
     tv: normalized.filter((item) => item.mediaType === "tv"),
     page,
     totalPages,
-    correctedQuery,
-    query: activeQuery
+    correctedQuery: "",
+    query: text
   };
   searchCache.set(cacheKey, { timestamp: Date.now(), result });
   return result;
@@ -1049,8 +1085,8 @@ function mapGenreIds(ids, mediaType) {
   };
   const tvGenres = {
     10759: "Action", 16: "Animation", 35: "Comedy", 80: "Crime", 99: "Documentary", 18: "Drama",
-    10751: "Family", 10762: "Kids", 9648: "Mystery", 10763: "News", 10764: "Reality", 10765: "Sci-Fi",
-    10766: "Soap", 10767: "Talk", 10768: "War", 37: "Western"
+    10751: "Family", 10762: "Kids", 27: "Horror", 9648: "Mystery", 10763: "News", 10764: "Reality",
+    10749: "Romance", 10765: "Sci-Fi", 10766: "Soap", 10767: "Talk", 10768: "War", 37: "Western"
   };
 
   const map = mediaType === "tv" ? tvGenres : movieGenres;

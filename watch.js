@@ -1,8 +1,9 @@
 import { apiRequest, authHeaders, clearStoredSession, ensureSession } from "./auth-client.js";
-import { avatarDataUri, avatarSrcById, initSharedFooterReport, initSharedNavSearch, normalizeAvatarId, openSettingsModal, openSharedAuthModal } from "./shared-ui.js?v=20260508-toggle1";
-import { initHeaderNotifications } from "./notifications.js?v=20260508-toggle1";
-import { initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
+import { avatarDataUri, avatarSrcById, initSharedFooterReport, initSharedNavSearch, normalizeAvatarId, openSettingsModal, openSharedAuthModal } from "./shared-ui.js?v=20260513-fixes1";
+import { initHeaderNotifications } from "./notifications.js?v=20260513-fixes1";
+import { initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
 import { showToast } from "./ui-toast.js";
+import { deleteBookmarkFromCloud, pushBookmarksToCloud, syncBookmarksWithCloud } from "./bookmark-sync.js";
 import {
   fetchItemDetailsById,
   fetchRelatedById,
@@ -11,9 +12,9 @@ import {
   seasonCount,
   titleById,
   posterById
-} from "./catalog.js?v=20260508-toggle1";
-import { getBookmarksKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260508-toggle1";
-import { buildWatchHref, escapeHtml, formatSeconds, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
+} from "./catalog.js?v=20260513-fixes1";
+import { getBookmarksKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
+import { buildResumableWatchHref, buildWatchHref, escapeHtml, formatSeconds, normalizePlaybackTimestamp, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260513-fixes1";
 
 const PLAYER_BASE = "https://www.vidking.net/embed";
 const VIDROCK_BASE = "https://vidrock.net";
@@ -82,9 +83,10 @@ const state = {
   resumeFallbackTimer: null,
   resumeSeekAttempts: 0,
   resumeConfirmed: false,
+  serverSwitchInProgress: false,
   lastPlayerEventAt: 0,
   lastPlaybackTime: 0,
-  playerSupportsCommands: true,
+  playerSupportsCommands: false,
   playerLoadedAt: 0,
   serverProgressTimer: null,
   serverProgressStartedAt: 0,
@@ -111,7 +113,7 @@ boot();
 async function boot() {
   syncProgressState();
   initConfiguredTmdb();
-  initSharedNavSearch();
+  initSharedNavSearch({ getProgress: () => state.progress });
   initSharedFooterReport(() => state.session);
 
   state.playerServer = normalizeServerId(state.settings?.preferredServer || state.playerServer);
@@ -212,6 +214,7 @@ function bindEvents() {
       el.bookmarkTrigger.classList.remove("active");
       el.bookmarkTrigger.setAttribute("aria-expanded", "false");
     }
+    updateMenuScrimVisibility();
   });
 
   [...document.querySelectorAll(".bookmark-option")].forEach((node) => {
@@ -230,6 +233,7 @@ function bindEvents() {
       el.bookmarkTrigger.classList.remove("active");
       el.bookmarkTrigger.setAttribute("aria-expanded", "false");
     }
+    updateMenuScrimVisibility();
   });
 
   el.reportTrigger.addEventListener("click", openReportDialog);
@@ -262,10 +266,18 @@ function bindEvents() {
     if (event.key !== "cinerune:session") return;
     void initAuth();
   });
-  window.addEventListener("cinerune:session-updated", (event) => {
+  window.addEventListener("cinerune:session-updated", async (event) => {
     state.session = event.detail || null;
+    state.progress = {};
+    state.bookmarks = {};
+    if (el.sideProgress) el.sideProgress.textContent = "Checking saved progress...";
     syncProgressState();
     state.bookmarks = readJson(getBookmarksKey(state.session), {});
+    if (state.session?.user) {
+      state.bookmarks = await syncBookmarksWithCloud(state.session, state.bookmarks);
+      localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+    }
+    if (state.item) hydrateInfo();
     syncBookmarkButton();
     renderWatchAccountUI();
   });
@@ -317,8 +329,9 @@ function hydrateInfo() {
   }
 
   const resume = getSavedProgress();
-  el.sideProgress.textContent = resume?.timestamp
-    ? `Resume: ${formatSeconds(resume.timestamp)} (${Math.round(Number(resume.progress || 0))}%)`
+  const resumeTimestamp = normalizePlaybackTimestamp(resume?.timestamp, resume?.duration);
+  el.sideProgress.textContent = resumeTimestamp
+    ? `Resume: ${formatSeconds(resumeTimestamp)} (${Math.round(Number(resume.progress || 0))}%)`
     : "No saved progress yet.";
 
   syncBookmarkButton();
@@ -361,7 +374,7 @@ function deferSecondaryWatchContent() {
 
 async function refillEpisodeGrid() {
   if (!el.episodeGrid) return;
-  const episodes = await fetchSeasonEpisodes(state.id, state.season);
+  const episodes = await fetchSeasonEpisodes(state.id, state.season, { forceRefresh: true });
   const totalEpisodes = episodes.length;
 
   state.episode = totalEpisodes > 0
@@ -472,19 +485,25 @@ function loadPlayer() {
   state.playerSupportsCommands = false;
   state.playerLoadedAt = 0;
 
-  const resume = state.resumeMode && !state.resumeAttempted ? getSavedProgress() : null;
+  const shouldUseSavedResume = state.resumeMode && !state.resumeAttempted && !state.serverSwitchInProgress;
+  const resume = shouldUseSavedResume ? getSavedProgress() : null;
   let appliedResume = false;
-  state.resumeTarget = 0;
-  if (resume?.timestamp > 0 && Number(resume.progress || 0) < 98) {
-    const duration = Number(resume.duration || 0);
-    let safeTimestamp = Math.floor(Number(resume.timestamp));
-    if (duration > 0) {
-      safeTimestamp = Math.min(Math.max(safeTimestamp, 0), Math.max(duration - 5, 0));
-    }
-    const minRemaining = duration > 0 ? 30 : 0;
-    if (safeTimestamp > 2 && (duration === 0 || safeTimestamp < duration - minRemaining)) {
-      appliedResume = true;
-      state.resumeTarget = safeTimestamp;
+  if (state.serverSwitchInProgress) {
+    appliedResume = state.resumeTarget > 0;
+  } else {
+    state.resumeTarget = 0;
+    const resumeTimestamp = normalizePlaybackTimestamp(resume?.timestamp, resume?.duration);
+    if (resumeTimestamp > 0 && Number(resume.progress || 0) < 98) {
+      const duration = Number(resume.duration || 0);
+      let safeTimestamp = resumeTimestamp;
+      if (duration > 0) {
+        safeTimestamp = Math.min(Math.max(safeTimestamp, 0), Math.max(duration - 5, 0));
+      }
+      const minRemaining = duration > 0 ? 30 : 0;
+      if (safeTimestamp > 2 && (duration === 0 || safeTimestamp < duration - minRemaining)) {
+        appliedResume = true;
+        state.resumeTarget = safeTimestamp;
+      }
     }
   }
 
@@ -498,6 +517,7 @@ function loadPlayer() {
   scheduleResumeSeek(appliedResume);
   ensureProgressEntry();
   startFallbackProgress();
+  state.serverSwitchInProgress = false;
 
     // Do not show a transient "Player loaded" message to users.
 }
@@ -596,7 +616,7 @@ async function renderRelated() {
     meta.append(title, sub);
     link.append(image, badge, meta);
 
-    link.href = buildWatchHref(item.id, item.mediaType);
+    link.href = buildResumableWatchHref(item, state.progress);
 
     card.appendChild(link);
     fragment.appendChild(card);
@@ -615,6 +635,7 @@ function saveBookmark(status) {
   if (status === "clear" || current?.status === status) {
     delete state.bookmarks[key];
     localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+    void deleteBookmarkFromCloud(state.session, state.mediaType, state.id);
     syncBookmarkButton();
     showBookmarkToast("Removed");
     setStatus("Bookmark removed.");
@@ -633,6 +654,7 @@ function saveBookmark(status) {
   };
 
   localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+  void pushBookmarksToCloud(state.session, state.bookmarks);
   syncBookmarkButton();
   showBookmarkToast(`Marked ${labelForStatus(normalizedStatus)}`);
   setStatus(`Saved to ${labelForStatus(normalizedStatus)}.`);
@@ -784,6 +806,13 @@ async function onPlayerMessage(event) {
 
   if (!data) return;
 
+  if (!state.playerSupportsCommands) {
+    state.playerSupportsCommands = true;
+    if (state.resumeMode && state.resumeTarget > 0 && !state.resumeConfirmed && state.resumeSeekAttempts === 0) {
+      scheduleResumeSeek(true);
+    }
+  }
+
   const mediaType = data.mediaType || data.type;
   if (mediaType !== "movie" && mediaType !== "tv") return;
 
@@ -794,8 +823,8 @@ async function onPlayerMessage(event) {
   const episode = Number(data.episode || data.last_episode_watched || state.episode || 1);
   const key = `${mediaType}:${id}:${season}:${episode}`;
   const isCurrentTitle = mediaType === state.mediaType && id === Number(state.id);
-  const incomingTimestamp = Number(data.currentTime || data.timestamp || data.progress?.watched || 0) || 0;
   const durationValue = Number(data.duration || data.progress?.duration || 0) || 0;
+  const incomingTimestamp = normalizePlaybackTimestamp(data.currentTime ?? data.timestamp ?? 0, durationValue);
   let incomingProgress = Number(data.progress || 0) || 0;
   if (!incomingProgress && durationValue > 0 && incomingTimestamp > 0) {
     incomingProgress = (incomingTimestamp / durationValue) * 100;
@@ -809,6 +838,7 @@ async function onPlayerMessage(event) {
     && Number(existing.progress || 0) < 98
     && incomingTimestamp < 5
     && incomingProgress <= 1
+    && !state.serverSwitchInProgress
   ) {
     return;
   }
@@ -865,7 +895,7 @@ async function onPlayerMessage(event) {
     state.lastAutoNextKey = key;
     window.setTimeout(() => {
       if (state.lastAutoNextKey === key) state.lastAutoNextKey = "";
-    }, 8000);
+    }, 30000);
     await playNextEpisode();
   }
 }
@@ -1000,22 +1030,86 @@ function setPlayerServer(serverId) {
   const normalized = normalizeServerId(serverId);
   if (state.playerServer === normalized) return;
   state.playerServer = normalized;
-  state.resumeMode = true;
-  state.resumeAttempted = false;
-  state.resumeConfirmed = false;
+  if (normalized === "videasy") {
+    persistCurrentPlaybackForServerSwitch();
+    state.resumeMode = true;
+    state.resumeAttempted = false;
+    state.resumeConfirmed = false;
+    state.serverSwitchInProgress = true;
+  } else {
+    state.resumeMode = false;
+    state.resumeAttempted = true;
+    state.resumeConfirmed = false;
+    state.serverSwitchInProgress = false;
+  }
   state.settings.preferredServer = normalized;
   localStorage.setItem(settingsKey, JSON.stringify(state.settings));
   updatePlayerServerToggle();
   loadPlayer();
 }
 
+function persistCurrentPlaybackForServerSwitch() {
+  const key = `${state.mediaType}:${state.id}:${state.season}:${state.episode}`;
+  const existing = state.progress[key] || null;
+  const currentTimestamp = Math.max(
+    normalizePlaybackTimestamp(existing?.timestamp, existing?.duration),
+    normalizePlaybackTimestamp(state.lastPlaybackTime, existing?.duration),
+    getFallbackPlaybackTimestamp()
+  );
+  state.resumeTarget = currentTimestamp > 2 ? Math.floor(currentTimestamp) : 0;
+  if (currentTimestamp <= 2) {
+    state.progress[key] = {
+      mediaType: state.mediaType,
+      id: state.id,
+      season: state.season,
+      episode: state.episode,
+      timestamp: 0,
+      duration: Number(existing?.duration || 0),
+      progress: 0,
+      updatedAt: Date.now(),
+      title: state.item?.title || titleById(state.id, state.mediaType) || `Title ${state.id}`,
+      poster: state.item?.poster || posterById(state.id, state.mediaType) || ""
+    };
+    localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
+    queueAutoSync(true);
+    return;
+  }
+
+  state.progress[key] = {
+    mediaType: state.mediaType,
+    id: state.id,
+    season: state.season,
+    episode: state.episode,
+    timestamp: Math.floor(currentTimestamp),
+    duration: Number(existing?.duration || 0),
+    progress: Number(existing?.progress || 0),
+    updatedAt: Date.now(),
+    title: state.item?.title || titleById(state.id, state.mediaType) || `Title ${state.id}`,
+    poster: state.item?.poster || posterById(state.id, state.mediaType) || ""
+  };
+  localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
+  queueAutoSync(true);
+}
+
+function getFallbackPlaybackTimestamp() {
+  if (!state.serverProgressStartedAt) return 0;
+  const elapsedSeconds = Math.floor((Date.now() - state.serverProgressStartedAt) / 1000);
+  return Number(state.serverProgressBaseTimestamp || 0) + Math.max(0, elapsedSeconds);
+}
+
 function updatePlayerServerToggle() {
   const normalized = normalizeServerId(state.playerServer);
   const toggle = document.querySelector(".player-server-toggle");
   const buttons = toggle ? [...toggle.querySelectorAll("[data-server]")] : [];
+  const serverLabels = {
+    videasy: "Videasy",
+    vidrock: "Vidrock",
+    vidking: "Vidking"
+  };
   buttons.forEach((button, index) => {
     const serverId = normalizeServerId(button.dataset.server);
     button.classList.toggle("active", normalized === serverId);
+    button.title = serverLabels[serverId] || serverId;
     const label = button.querySelector("span:last-child");
     if (label) label.textContent = `Server ${index + 1}`;
   });
@@ -1060,6 +1154,12 @@ function buildPlayerUrl(serverId) {
   if (state.settings.autoPlay || state.resumeMode) {
     url.searchParams.set("autoPlay", "true");
   }
+  if (state.resumeTarget > 0) {
+    url.searchParams.set("progress", String(Math.floor(state.resumeTarget)));
+  }
+  if (state.serverSwitchInProgress) {
+    url.searchParams.set("_t", String(Date.now()));
+  }
   if (state.mediaType === "tv") {
     if (state.settings.nextEpisode) {
       url.searchParams.set("nextEpisode", "true");
@@ -1098,6 +1198,10 @@ async function initAuth() {
     state.session = session;
     syncProgressState();
     state.bookmarks = readJson(getBookmarksKey(session), {});
+    if (state.session?.user) {
+      state.bookmarks = await syncBookmarksWithCloud(state.session, state.bookmarks);
+      localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+    }
     syncBookmarkButton();
     renderWatchAccountUI();
     if (state.session?.user) queueAutoSync(true);
@@ -1116,7 +1220,7 @@ function renderWatchAccountUI() {
       setAccountAvatarImage(el.watchAccountAvatar, avatarId);
       el.watchAccountAvatar.alt = "Selected avatar";
     }
-    if (el.watchAccountLabel) el.watchAccountLabel.textContent = "Account";
+    if (el.watchAccountLabel) el.watchAccountLabel.textContent = state.session.user.user_metadata?.username || "Account";
     el.watchAccountBtn.classList.add("active");
     if (el.watchListsLink) el.watchListsLink.removeAttribute("hidden");
   } else {
@@ -1167,6 +1271,7 @@ function toggleWatchAccountMenu() {
   if (hidden) {
     el.watchAccountMenu.removeAttribute("hidden");
     el.watchAccountBtn?.setAttribute("aria-expanded", "true");
+    updateMenuScrimVisibility();
   } else {
     closeWatchAccountMenu();
   }
@@ -1176,6 +1281,40 @@ function closeWatchAccountMenu() {
   if (!el.watchAccountMenu) return;
   el.watchAccountMenu.setAttribute("hidden", "");
   el.watchAccountBtn?.setAttribute("aria-expanded", "false");
+  updateMenuScrimVisibility();
+}
+
+function getMenuScrim() {
+  let scrim = document.getElementById("menuScrim");
+  if (!scrim) {
+    scrim = document.createElement("div");
+    scrim.id = "menuScrim";
+    scrim.className = "menu-scrim";
+    scrim.setAttribute("hidden", "");
+    document.body.appendChild(scrim);
+  }
+  if (scrim.dataset.scrimReady !== "1") {
+    scrim.dataset.scrimReady = "1";
+    scrim.addEventListener("click", () => {
+      closeWatchAccountMenu();
+      if (el.bookmarkMenu) {
+        el.bookmarkMenu.setAttribute("hidden", "");
+      }
+      if (el.bookmarkTrigger) {
+        el.bookmarkTrigger.classList.remove("active");
+        el.bookmarkTrigger.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+  return scrim;
+}
+
+function updateMenuScrimVisibility() {
+  const scrim = getMenuScrim();
+  const menusOpen = [el.watchAccountMenu, el.bookmarkMenu]
+    .some((menu) => menu && !menu.hasAttribute("hidden"));
+  const shouldShowScrim = menusOpen && window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+  scrim.toggleAttribute("hidden", !shouldShowScrim);
 }
 
 async function syncProgressToCloud() {
@@ -1251,7 +1390,7 @@ function dedupeProgressRows(entries) {
 function queueAutoSync(immediate = false) {
   if (!state.session?.user) return;
 
-  const minGapMs = 15000;
+  const minGapMs = 5000;
   const elapsed = Date.now() - state.lastSyncAt;
   const delay = immediate ? 0 : Math.max(1500, minGapMs - elapsed);
 

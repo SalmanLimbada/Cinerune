@@ -1,10 +1,11 @@
 import { apiRequest, authHeaders, ensureSession, getStoredSession, setStoredSession, clearStoredSession } from "./auth-client.js";
-import { ensureSharedReportMenuItem, initSharedFooterReport, initSharedNavSearch, openSettingsModal, renderSharedAccount } from "./shared-ui.js?v=20260508-toggle1";
+import { ensureSharedReportMenuItem, initSharedFooterReport, initSharedNavSearch, openSettingsModal, renderSharedAccount } from "./shared-ui.js?v=20260513-fixes1";
 import { showToast } from "./ui-toast.js";
-import * as catalogApi from "./catalog.js?v=20260508-toggle1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
-import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260508-toggle1";
-import { buildWatchHref, escapeHtml, formatSeconds, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
+import { syncBookmarksWithCloud } from "./bookmark-sync.js";
+import * as catalogApi from "./catalog.js?v=20260513-fixes1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
+import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
+import { buildResumableWatchHref, buildWatchHref, escapeHtml, formatSeconds, normalizePlaybackTimestamp, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260513-fixes1";
 
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
 const fetchGenreOptions = catalogApi.fetchGenreOptions || (async () => ({ movie: [], tv: [] }));
@@ -122,6 +123,9 @@ const el = {
   popularGrid: document.getElementById("popularGrid"),
   popularPrevBtn: document.getElementById("popularPrevBtn"),
   popularNextBtn: document.getElementById("popularNextBtn"),
+  airingTodayGrid: document.getElementById("airingTodayGrid"),
+  airingTodayPrevBtn: document.getElementById("airingTodayPrevBtn"),
+  airingTodayNextBtn: document.getElementById("airingTodayNextBtn"),
   navSearchBtn: document.getElementById("navSearchBtn"),
   navSearchInput: document.getElementById("navSearchInput"),
   navSearchForm: document.getElementById("navSearchForm"),
@@ -139,7 +143,8 @@ const state = {
     hero: null,
     recommended: [],
     trending: [],
-    popular: []
+    popular: [],
+    airingToday: []
   },
   genreOptions: [],
   countryOptions: [],
@@ -152,6 +157,8 @@ const state = {
   readNotificationIds: new Set(),
   autoSyncTimer: null,
   lastSyncAt: 0,
+  progressPullTimer: null,
+  lastProgressPullAt: 0,
   heroRotationTimer: null,
   passwordRecoveryMode: false
 };
@@ -237,6 +244,7 @@ function bindEvents() {
   bindRowArrows(el.recommendedGrid, el.recommendedPrevBtn, el.recommendedNextBtn);
   bindRowArrows(el.trendingGrid, el.trendingPrevBtn, el.trendingNextBtn);
   bindRowArrows(el.popularGrid, el.popularPrevBtn, el.popularNextBtn);
+  bindRowArrows(el.airingTodayGrid, el.airingTodayPrevBtn, el.airingTodayNextBtn);
 
   if (el.closeAuth) {
     el.closeAuth.addEventListener("click", closeAuthModal);
@@ -247,6 +255,13 @@ function bindEvents() {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeAuthModal();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (!state.session?.user) return;
+    const stale = Date.now() - state.lastProgressPullAt > 30000;
+    if (stale) void pullCloudProgress();
   });
 
   if (el.signInBtn) el.signInBtn.addEventListener("click", signIn);
@@ -306,6 +321,7 @@ function bindEvents() {
 
   if (el.navSearchInput) {
     initSharedNavSearch({
+      getProgress: () => state.progress,
       onClear: () => {
         state.searchResults = [];
         hideSearchResults();
@@ -387,16 +403,28 @@ function bindEvents() {
 
 async function handleSessionStorageChange(options = {}) {
   const session = await ensureSession();
+  state.progress = {};
+  state.bookmarks = {};
+  state.notifications = [];
+  el.continueSection?.setAttribute("hidden", "");
+  if (el.continueGrid) el.continueGrid.innerHTML = "";
+  renderNotifications();
   state.session = session;
   syncProgressState();
   syncBookmarksState();
+  if (state.session?.user) {
+    state.bookmarks = await syncBookmarksWithCloud(state.session, state.bookmarks);
+    localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+  }
   syncNotificationReadState();
   renderAuthUI();
   if (session?.user) {
     if (!options.quiet) setAuthHint("Signed in.");
     if (!options.quiet) closeAuthModal();
     await pullCloudProgress();
+    startProgressPulling();
   } else {
+    stopProgressPulling();
     refreshPersonalizedCollections();
     hydrateContinueRow();
   }
@@ -458,11 +486,13 @@ async function applyHomeData(homeData, options = {}) {
     : await buildRecommendedRow(homeData);
   state.homeData.trending = homeData.trending || [];
   state.homeData.popular = homeData.popular || [];
+  state.homeData.airingToday = homeData.airingToday || [];
 
   renderHero();
   renderRecommended();
   renderTrending();
   renderPopular();
+  renderAiringToday();
 }
 
 function renderUnavailableState() {
@@ -477,6 +507,7 @@ function renderUnavailableState() {
   el.recommendedGrid.innerHTML = "";
   el.trendingGrid.innerHTML = "";
   if (el.popularGrid) el.popularGrid.innerHTML = "";
+  if (el.airingTodayGrid) el.airingTodayGrid.innerHTML = "";
   if (el.megaMenuGrid) el.megaMenuGrid.innerHTML = "";
 }
 
@@ -536,6 +567,11 @@ function renderPopular() {
   renderPosterCards(el.popularGrid, (state.homeData.popular || []).slice(0, 24));
 }
 
+function renderAiringToday() {
+  if (!el.airingTodayGrid) return;
+  renderPosterCards(el.airingTodayGrid, (state.homeData.airingToday || []).slice(0, 24));
+}
+
 function renderMegaMenu() {
   if (!el.megaMenuTitle || !el.megaMenuGrid) return;
   const isGenre = state.explorerMode === "genre";
@@ -568,7 +604,7 @@ function renderMegaMenu() {
 
 async function hydrateContinueRow() {
   const entries = dedupeContinueEntries(Object.values(state.progress)
-    .filter((entry) => Number(entry.timestamp || 0) > 8 && Number(entry.progress || 0) < 98))
+    .filter((entry) => normalizePlaybackTimestamp(entry.timestamp, entry.duration) > 8 && Number(entry.progress || 0) < 98))
     .slice(0, 14);
 
   updateContinueWatchingLink(entries[0] || null);
@@ -594,11 +630,11 @@ async function hydrateContinueRow() {
       poster: apiItem?.poster || entry.poster || posterById(entry.id, entry.mediaType) || "",
       year: apiItem?.year || "",
       progressPercent: Math.max(0, Math.min(100, Number(entry.progress || 0))),
-      resumeSeconds: Number(entry.timestamp || 0),
+      resumeSeconds: normalizePlaybackTimestamp(entry.timestamp, entry.duration),
       progressKey: `${entry.mediaType}:${entry.id}:${entry.season || 1}:${entry.episode || 1}`,
       progressMeta: entry.mediaType === "tv"
-        ? `S${entry.season || 1} E${entry.episode || 1} • ${formatSeconds(entry.timestamp)}`
-        : `${Math.round(Number(entry.progress || 0))}% • ${formatSeconds(entry.timestamp)}`
+        ? `S${entry.season || 1} E${entry.episode || 1} • ${formatSeconds(normalizePlaybackTimestamp(entry.timestamp, entry.duration))}`
+        : `${Math.round(Number(entry.progress || 0))}% • ${formatSeconds(normalizePlaybackTimestamp(entry.timestamp, entry.duration))}`
     };
   }).filter((item) => !isSensitiveCatalogItem(item));
 
@@ -667,13 +703,15 @@ function renderPosterCards(container, items, options = {}) {
     }
 
     const resume = Boolean(options.resumeOnClick);
-    const href = buildWatchHref(
-      item.id,
-      item.mediaType,
-      item.season || item.defaultSeason || 1,
-      item.episode || item.defaultEpisode || 1,
-      resume
-    );
+    const href = resume
+      ? buildWatchHref(
+        item.id,
+        item.mediaType,
+        item.season || item.defaultSeason || 1,
+        item.episode || item.defaultEpisode || 1,
+        true
+      )
+      : buildResumableWatchHref(item, state.progress);
     if (link) link.href = href;
 
     fragment.appendChild(node);
@@ -813,7 +851,7 @@ async function buildEpisodeNotification(entry) {
     episodeName: item?.latestEpisodeName || "",
     sortAt: Date.parse(latestAirDate) || Date.now(),
     message: `${item?.title || entry.title || "This show"} has a new episode available.`,
-    href: buildWatchHref(id, "tv", latestSeason, latestEpisode)
+    href: buildWatchHref(id, "tv", latestSeason, latestEpisode, true)
   };
   notification.readId = buildNotificationReadId(notification);
   return notification;
@@ -927,6 +965,7 @@ function toggleNotificationsMenu() {
   if (hidden) {
     el.notificationsMenu.removeAttribute("hidden");
     el.notificationsBtn?.setAttribute("aria-expanded", "true");
+    updateMenuScrimVisibility();
   } else {
     closeNotificationsMenu();
   }
@@ -936,6 +975,7 @@ function closeNotificationsMenu() {
   if (!el.notificationsMenu) return;
   el.notificationsMenu.setAttribute("hidden", "");
   el.notificationsBtn?.setAttribute("aria-expanded", "false");
+  updateMenuScrimVisibility();
 }
 
 function toggleSettingsPanel(panelName) {
@@ -1025,18 +1065,41 @@ function syncProgressState() {
   state.progress = progress && typeof progress === "object" ? progress : {};
 }
 
+function startProgressPulling() {
+  stopProgressPulling();
+  if (!state.session?.user) return;
+  state.progressPullTimer = window.setInterval(() => {
+    if (!state.session?.user) return;
+    if (document.visibilityState !== "visible") return;
+    void pullCloudProgress();
+  }, 60000);
+}
+
+function stopProgressPulling() {
+  if (state.progressPullTimer) {
+    window.clearInterval(state.progressPullTimer);
+    state.progressPullTimer = null;
+  }
+}
+
 async function initAuth() {
   try {
     const session = await ensureSession();
     state.session = session;
     syncProgressState();
     syncBookmarksState();
+    if (state.session?.user) {
+      state.bookmarks = await syncBookmarksWithCloud(state.session, state.bookmarks);
+      localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+    }
     syncNotificationReadState();
     renderAuthUI();
     renderNotifications();
     if (state.session?.user) {
       await pullCloudProgress();
+      startProgressPulling();
     } else {
+      stopProgressPulling();
       refreshPersonalizedCollections();
       hydrateContinueRow();
     }
@@ -1385,6 +1448,7 @@ async function signOut() {
 
   clearStoredSession();
   state.session = null;
+  stopProgressPulling();
   syncProgressState();
   syncBookmarksState();
   syncNotificationReadState();
@@ -1815,6 +1879,7 @@ function toggleAccountMenu(forceOpen) {
   if (shouldOpen) {
     el.accountMenu.removeAttribute("hidden");
     el.toggleAuth?.classList.add("active");
+    updateMenuScrimVisibility();
   } else {
     closeAccountMenu();
   }
@@ -1824,6 +1889,34 @@ function closeAccountMenu() {
   if (!el.accountMenu) return;
   el.accountMenu.setAttribute("hidden", "");
   el.toggleAuth?.classList.remove("active");
+  updateMenuScrimVisibility();
+}
+
+function getMenuScrim() {
+  let scrim = document.getElementById("menuScrim");
+  if (!scrim) {
+    scrim = document.createElement("div");
+    scrim.id = "menuScrim";
+    scrim.className = "menu-scrim";
+    scrim.setAttribute("hidden", "");
+    document.body.appendChild(scrim);
+  }
+  if (scrim.dataset.scrimReady !== "1") {
+    scrim.dataset.scrimReady = "1";
+    scrim.addEventListener("click", () => {
+      closeAccountMenu();
+      closeNotificationsMenu();
+    });
+  }
+  return scrim;
+}
+
+function updateMenuScrimVisibility() {
+  const scrim = getMenuScrim();
+  const menusOpen = [el.accountMenu, el.notificationsMenu]
+    .some((menu) => menu && !menu.hasAttribute("hidden"));
+  const shouldShowScrim = menusOpen && window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+  scrim.toggleAttribute("hidden", !shouldShowScrim);
 }
 
 function openAuthModal(mode = "login") {
@@ -1926,6 +2019,8 @@ async function pullCloudProgress() {
   if (!state.session?.user) return;
   const session = await ensureSession();
   if (!session) return;
+
+  state.lastProgressPullAt = Date.now();
 
   let data = null;
   try {

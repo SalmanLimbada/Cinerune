@@ -1,7 +1,7 @@
 import { ensureSession } from "./auth-client.js";
-import { fetchItemDetailsById } from "./catalog.js?v=20260508-toggle1";
-import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
-import { buildWatchHref, escapeHtml, readJson } from "./shared-utils.js?v=20260508-toggle1";
+import { fetchItemDetailsById } from "./catalog.js?v=20260513-fixes1";
+import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb } from "./shared-state.js?v=20260513-fixes1";
+import { buildWatchHref, escapeHtml, readJson } from "./shared-utils.js?v=20260513-fixes1";
 
 const NEW_EPISODE_WINDOW_DAYS = 45;
 
@@ -39,6 +39,7 @@ export async function initHeaderNotifications() {
     closeAccountMenu();
     menu.toggleAttribute("hidden", !hidden);
     button.setAttribute("aria-expanded", hidden ? "true" : "false");
+    updateMenuScrimVisibility();
   });
 
   markAll?.addEventListener("click", () => {
@@ -67,8 +68,31 @@ export async function initHeaderNotifications() {
     if (!wrap.contains(event.target)) {
       menu.setAttribute("hidden", "");
       button.setAttribute("aria-expanded", "false");
+      updateMenuScrimVisibility();
     }
   });
+}
+
+function getMenuScrim() {
+  let scrim = document.getElementById("menuScrim");
+  if (!scrim) {
+    scrim = document.createElement("div");
+    scrim.id = "menuScrim";
+    scrim.className = "menu-scrim";
+    scrim.setAttribute("hidden", "");
+    document.body.appendChild(scrim);
+  }
+  return scrim;
+}
+
+function updateMenuScrimVisibility() {
+  const scrim = getMenuScrim();
+  const accountMenu = document.getElementById("accountMenu");
+  const notificationsMenu = document.getElementById("notificationsMenu");
+  const menusOpen = [accountMenu, notificationsMenu]
+    .some((menu) => menu && !menu.hasAttribute("hidden"));
+  const shouldShowScrim = menusOpen && window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+  scrim.toggleAttribute("hidden", !shouldShowScrim);
 }
 
 export async function initInboxPage() {
@@ -153,7 +177,7 @@ async function buildEpisodeNotification(entry, progress) {
     airDate: latestAirDate,
     episodeName: item?.latestEpisodeName || "",
     sortAt: Date.parse(latestAirDate) || Date.now(),
-    href: buildWatchHref(id, "tv", latestSeason, latestEpisode)
+    href: buildWatchHref(id, "tv", latestSeason, latestEpisode, true)
   };
   notification.readId = buildNotificationReadId(notification);
   return notification;
@@ -183,7 +207,7 @@ function renderNotifications(container, state, options = {}) {
             <span>${escapeHtml(formatShortDate(item.airDate))}</span>
           </span>
         </a>
-        <button class="mini-action-btn notification-read-btn" type="button" data-read-id="${escapeHtml(item.readId)}">${read ? "Read" : "Read"}</button>
+        <button class="mini-action-btn notification-read-btn${read ? " is-read" : ""}" type="button" data-read-id="${escapeHtml(item.readId)}">${read ? "Read" : "Mark read"}</button>
       </div>
     `;
   }).join("");

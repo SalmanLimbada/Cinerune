@@ -93,6 +93,18 @@ export default {
         return withCors(await handleProgressPush(request, env), origin);
       }
 
+      if (url.pathname === "/api/bookmarks/pull") {
+        return withCors(await handleBookmarksPull(request, env, url), origin);
+      }
+
+      if (url.pathname === "/api/bookmarks/push") {
+        return withCors(await handleBookmarksPush(request, env), origin);
+      }
+
+      if (url.pathname === "/api/bookmarks/delete") {
+        return withCors(await handleBookmarksDelete(request, env), origin);
+      }
+
       if (url.pathname === "/api/report") {
         return withCors(await handleReportSubmit(request, env), origin);
       }
@@ -113,6 +125,16 @@ async function handleTmdbProxy(request, env, url, ctx) {
 
   if (!env.TMDB_READ_TOKEN) {
     return jsonResponse({ error: "TMDB token missing" }, 500);
+  }
+
+  if (!shouldBypassAuthRateLimit(env, request)) {
+    const ip = getClientIp(request);
+    const limited = await checkRateLimit(env, `rl:tmdb:${ip}`, 100);
+    if (limited.blocked) {
+      return jsonResponse({ error: "Too many TMDB requests. Try again later." }, 429, {
+        "Retry-After": String(limited.retryAfter)
+      });
+    }
   }
 
   const tmdbPath = url.pathname.replace("/api/tmdb", "");
@@ -275,6 +297,7 @@ async function handleAuthDelete(request, env) {
   }
 
   await deleteUserProgress(env, currentUser.id);
+  await deleteUserBookmarks(env, currentUser.id);
   await deleteLoginAlias(env, currentUser.user_metadata?.username);
 
   const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(currentUser.id)}`, {
@@ -421,7 +444,25 @@ async function handleAuthLogout(request, env) {
     return jsonResponse({ error: "Missing token." }, 401);
   }
 
-  return proxySupabaseAuth(env, "/auth/v1/logout", null, token);
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
+    return jsonResponse({ error: "Supabase config missing." }, 500);
+  }
+
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/logout`, {
+    method: "POST",
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    }
+  });
+
+  if (response.ok || response.status === 204) {
+    return jsonResponse({ ok: true });
+  }
+
+  const body = await response.text().catch(() => "");
+  return jsonResponse({ error: body || "Logout failed." }, response.status || 500);
 }
 
 async function handleAuthUpdate(request, env) {
@@ -609,6 +650,105 @@ async function handleProgressPush(request, env) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify(rows)
+  });
+
+  if (!response.ok) {
+    return proxyJson(response);
+  }
+
+  return jsonResponse({ ok: true });
+}
+
+async function handleBookmarksPull(request, env, url) {
+  if (request.method !== "GET" && request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  const token = getBearerToken(request);
+  if (!token) {
+    return jsonResponse({ error: "Missing token." }, 401);
+  }
+
+  const limitParam = request.method === "POST"
+    ? Number((await readJson(request))?.limit || 500)
+    : Number(url.searchParams.get("limit") || 500);
+  const limit = Math.max(1, Math.min(500, limitParam));
+
+  const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
+  apiUrl.searchParams.set("select", "media_type,content_id,status,title,poster,updated_at");
+  apiUrl.searchParams.set("order", "updated_at.desc");
+  apiUrl.searchParams.set("limit", String(limit));
+
+  const response = await fetch(apiUrl.toString(), {
+    headers: supabaseHeaders(env, token)
+  });
+
+  return proxyJson(response);
+}
+
+async function handleBookmarksPush(request, env) {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  const token = getBearerToken(request);
+  if (!token) {
+    return jsonResponse({ error: "Missing token." }, 401);
+  }
+
+  const payload = await readJson(request);
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+
+  if (!rows.length || rows.length > 240) {
+    return jsonResponse({ error: "Invalid payload." }, 400);
+  }
+
+  const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
+  apiUrl.searchParams.set("on_conflict", "user_id,media_type,content_id");
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      ...supabaseHeaders(env, token),
+      Prefer: "resolution=merge-duplicates,return=minimal",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(rows)
+  });
+
+  if (!response.ok) {
+    return proxyJson(response);
+  }
+
+  return jsonResponse({ ok: true });
+}
+
+async function handleBookmarksDelete(request, env) {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  const token = getBearerToken(request);
+  if (!token) {
+    return jsonResponse({ error: "Missing token." }, 401);
+  }
+
+  const payload = await readJson(request);
+  const mediaType = payload?.media_type === "tv" ? "tv" : "movie";
+  const contentId = Number(payload?.content_id || 0);
+  if (!contentId) {
+    return jsonResponse({ error: "Invalid bookmark." }, 400);
+  }
+
+  const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
+  apiUrl.searchParams.set("media_type", `eq.${mediaType}`);
+  apiUrl.searchParams.set("content_id", `eq.${contentId}`);
+
+  const response = await fetch(apiUrl, {
+    method: "DELETE",
+    headers: {
+      ...supabaseHeaders(env, token),
+      Prefer: "return=minimal"
+    }
   });
 
   if (!response.ok) {
@@ -1025,6 +1165,20 @@ async function proxyJson(response, headers = {}) {
     headers: {
       "Content-Type": "application/json",
       ...headers
+    }
+  });
+}
+
+async function deleteUserBookmarks(env, userId) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !userId) return;
+  const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
+  apiUrl.searchParams.set("user_id", `eq.${userId}`);
+  await fetch(apiUrl.toString(), {
+    method: "DELETE",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      Prefer: "return=minimal"
     }
   });
 }

@@ -1,10 +1,11 @@
 import {
   fetchTopRatedPage
-} from "./catalog.js?v=20260508-toggle1";
-import { initSharedHeader } from "./shared-ui.js?v=20260508-toggle1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260508-toggle1";
-import { initConfiguredTmdb } from "./shared-state.js?v=20260508-toggle1";
-import { buildWatchHref, escapeHtml, setPosterImage } from "./shared-utils.js?v=20260508-toggle1";
+} from "./catalog.js?v=20260513-fixes1";
+import { initSharedHeader } from "./shared-ui.js?v=20260513-fixes1";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
+import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
+import { ensureSession } from "./auth-client.js";
+import { buildResumableWatchHref, escapeHtml, readJson, setPosterImage } from "./shared-utils.js?v=20260513-fixes1";
 
 const query = new URLSearchParams(window.location.search);
 const GRID_PAGE_SIZE = 24;
@@ -12,6 +13,7 @@ const API_PAGE_SIZE = 20;
 let mediaType = query.get("type") === "tv" ? "tv" : "movie";
 let page = Math.max(1, Number(query.get("page") || 1));
 const cache = { movie: new Map(), tv: new Map() };
+let activeProgress = {};
 const totals = { movie: 1, tv: 1 };
 const loading = { movie: new Map(), tv: new Map() };
 
@@ -30,6 +32,7 @@ boot();
 async function boot() {
   initSharedHeader();
   initConfiguredTmdb();
+  activeProgress = await loadActiveProgress();
 
   bindTypeToggle();
   bindPagination();
@@ -254,7 +257,7 @@ function renderPosterCards(items) {
       sub.textContent = baseMeta;
     }
 
-    if (link) link.href = buildWatchHref(item.id, item.mediaType);
+    if (link) link.href = buildResumableWatchHref(item, activeProgress);
 
     fragment.appendChild(node);
   });
@@ -262,4 +265,15 @@ function renderPosterCards(items) {
   el.topRatedGrid.appendChild(fragment);
   balancePosterGrid(el.topRatedGrid);
   initDragScroll();
+}
+
+async function loadActiveProgress() {
+  try {
+    const session = await ensureSession();
+    const progress = readJson(getProgressKey(session), null);
+    if (progress && typeof progress === "object") return progress;
+  } catch {
+    // Fall back to guest progress.
+  }
+  return readJson(getProgressKey(null), readJson(legacyProgressKey, {})) || {};
 }
