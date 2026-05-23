@@ -1,11 +1,11 @@
 import {
   fetchTopRatedPage
-} from "./catalog.js?v=20260513-fixes1";
-import { initSharedHeader } from "./shared-ui.js?v=20260513-fixes1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
-import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
-import { ensureSession } from "./auth-client.js";
-import { buildResumableWatchHref, escapeHtml, readJson, setPosterImage } from "./shared-utils.js?v=20260513-fixes1";
+} from "./catalog.js?v=20260515-bugfix2";
+import { initSharedHeader } from "./shared-ui.js?v=20260515-bugfix2";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260515-bugfix2";
+import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260515-bugfix2";
+import { getStoredSession } from "./auth-client.js";
+import { buildResumableWatchHref, escapeHtml, readJson, setPosterImage } from "./shared-utils.js?v=20260515-bugfix2";
 
 const query = new URLSearchParams(window.location.search);
 const GRID_PAGE_SIZE = 24;
@@ -58,6 +58,7 @@ async function setMediaType(nextType, options = {}) {
   updateToggleState();
   updateUrl(options.replace);
 
+  renderSkeletonCards(GRID_PAGE_SIZE);
   await ensureTopRated(nextType, page);
   renderFromCache(nextType, page);
 }
@@ -65,7 +66,7 @@ async function setMediaType(nextType, options = {}) {
 function updateToggleState() {
   el.topRatedMoviesLink?.classList.toggle("active", mediaType === "movie");
   el.topRatedTvLink?.classList.toggle("active", mediaType === "tv");
-  el.topRatedTitle.textContent = mediaType === "tv" ? "Top Rated TV Shows" : "Top Rated Movies";
+  el.topRatedTitle.textContent = "Top Rated";
 }
 
 function updateUrl(replace = false) {
@@ -147,7 +148,7 @@ function renderFromCache(type, pageNumber) {
     el.topRatedStatus.textContent = "Could not load top rated titles right now.";
     return;
   }
-  el.topRatedStatus.textContent = `Page ${pageNumber} of ${totals[type]} • Top rated ${type === "tv" ? "TV shows" : "movies"}.`;
+  el.topRatedStatus.textContent = "";
 }
 
 function bindPagination() {
@@ -160,6 +161,7 @@ function bindPagination() {
     if (nextPage === page) return;
     page = nextPage;
     updateUrl(true);
+    renderSkeletonCards(GRID_PAGE_SIZE);
     void ensureTopRated(mediaType, page).then(() => renderFromCache(mediaType, page));
   });
 }
@@ -194,6 +196,7 @@ function renderTopRatedPagination(totalPages) {
     if (!nextPage) return;
     page = nextPage;
     updateUrl(true);
+    renderSkeletonCards(GRID_PAGE_SIZE);
     void ensureTopRated(mediaType, page).then(() => renderFromCache(mediaType, page));
   };
   input?.addEventListener("keydown", (event) => {
@@ -267,13 +270,20 @@ function renderPosterCards(items) {
   initDragScroll();
 }
 
+function renderSkeletonCards(count = GRID_PAGE_SIZE) {
+  if (!el.topRatedGrid) return;
+  el.topRatedGrid.innerHTML = Array.from({ length: count }, () => `
+    <article class="poster-card skeleton-card" aria-hidden="true">
+      <span class="skeleton skeleton-poster"></span>
+      <span class="skeleton skeleton-line"></span>
+      <span class="skeleton skeleton-line short"></span>
+    </article>
+  `).join("");
+}
+
 async function loadActiveProgress() {
-  try {
-    const session = await ensureSession();
-    const progress = readJson(getProgressKey(session), null);
-    if (progress && typeof progress === "object") return progress;
-  } catch {
-    // Fall back to guest progress.
-  }
+  const session = getStoredSession();
+  const progress = readJson(getProgressKey(session), null);
+  if (progress && typeof progress === "object") return progress;
   return readJson(getProgressKey(null), readJson(legacyProgressKey, {})) || {};
 }

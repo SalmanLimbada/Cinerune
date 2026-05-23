@@ -1,4 +1,4 @@
-import { initTmdb } from "./catalog.js?v=20260513-fixes1";
+import { initTmdb } from "./catalog.js?v=20260515-bugfix2";
 
 export const legacyProgressKey = "cinerune:progress";
 export const progressBaseKey = "cinerune:progress";

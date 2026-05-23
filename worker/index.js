@@ -19,6 +19,7 @@ export default {
           "/": "/index.html",
           "/index": "/index.html",
           "/browse": "/browse.html",
+          "/recommended": "/recommended.html",
           "/top-rated": "/top-rated.html",
           "/search": "/search.html",
           "/lists": "/lists.html",
@@ -41,79 +42,87 @@ export default {
     }
 
     if (request.method === "OPTIONS") {
-      return withCors(new Response(null, { status: 204 }), origin);
+      return withCors(new Response(null, { status: 204 }), origin, env, url.origin);
     }
 
     try {
       if (url.pathname.startsWith("/api/tmdb/")) {
-        return withCors(await handleTmdbProxy(request, env, url, ctx), origin);
+        return withCors(await handleTmdbProxy(request, env, url, ctx), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/login") {
-        return withCors(await handleAuthLogin(request, env), origin);
+        return withCors(await handleAuthLogin(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/signup") {
-        return withCors(await handleAuthSignup(request, env), origin);
+        return withCors(await handleAuthSignup(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/refresh") {
-        return withCors(await handleAuthRefresh(request, env), origin);
+        return withCors(await handleAuthRefresh(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/me") {
-        return withCors(await handleAuthMe(request, env), origin);
+        return withCors(await handleAuthMe(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/forgot") {
-        return withCors(await handleAuthForgot(request, env), origin);
+        return withCors(await handleAuthForgot(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/add-email") {
-        return withCors(await handleAuthAddEmail(request, env), origin);
+        return withCors(await handleAuthAddEmail(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/logout") {
-        return withCors(await handleAuthLogout(request, env), origin);
+        return withCors(await handleAuthLogout(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/update") {
-        return withCors(await handleAuthUpdate(request, env), origin);
+        return withCors(await handleAuthUpdate(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/auth/delete") {
-        return withCors(await handleAuthDelete(request, env), origin);
+        return withCors(await handleAuthDelete(request, env), origin, env, url.origin);
+      }
+
+      if (url.pathname === "/api/notifications/read") {
+        return withCors(await handleNotificationReadState(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/progress/pull") {
-        return withCors(await handleProgressPull(request, env, url), origin);
+        return withCors(await handleProgressPull(request, env, url), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/progress/push") {
-        return withCors(await handleProgressPush(request, env), origin);
+        return withCors(await handleProgressPush(request, env), origin, env, url.origin);
+      }
+
+      if (url.pathname === "/api/progress/delete") {
+        return withCors(await handleProgressDelete(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/bookmarks/pull") {
-        return withCors(await handleBookmarksPull(request, env, url), origin);
+        return withCors(await handleBookmarksPull(request, env, url), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/bookmarks/push") {
-        return withCors(await handleBookmarksPush(request, env), origin);
+        return withCors(await handleBookmarksPush(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/bookmarks/delete") {
-        return withCors(await handleBookmarksDelete(request, env), origin);
+        return withCors(await handleBookmarksDelete(request, env), origin, env, url.origin);
       }
 
       if (url.pathname === "/api/report") {
-        return withCors(await handleReportSubmit(request, env), origin);
+        return withCors(await handleReportSubmit(request, env), origin, env, url.origin);
       }
 
-      return withCors(jsonResponse({ error: "Not found" }, 404), origin);
+      return withCors(jsonResponse({ error: "Not found" }, 404), origin, env, url.origin);
     } catch (error) {
       const message = error?.message || "Server error";
       const status = message === "Payload too large" ? 413 : 500;
-      return withCors(jsonResponse({ error: message }, status), origin);
+      return withCors(jsonResponse({ error: message }, status), origin, env, url.origin);
     }
   }
 };
@@ -125,16 +134,6 @@ async function handleTmdbProxy(request, env, url, ctx) {
 
   if (!env.TMDB_READ_TOKEN) {
     return jsonResponse({ error: "TMDB token missing" }, 500);
-  }
-
-  if (!shouldBypassAuthRateLimit(env, request)) {
-    const ip = getClientIp(request);
-    const limited = await checkRateLimit(env, `rl:tmdb:${ip}`, 100);
-    if (limited.blocked) {
-      return jsonResponse({ error: "Too many TMDB requests. Try again later." }, 429, {
-        "Retry-After": String(limited.retryAfter)
-      });
-    }
   }
 
   const tmdbPath = url.pathname.replace("/api/tmdb", "");
@@ -243,7 +242,17 @@ async function handleAuthSignup(request, env) {
     return jsonResponse({ error: "Invalid sign up details." }, 400);
   }
 
-  const existingEmail = env.RATE_LIMIT_KV?.get ? await env.RATE_LIMIT_KV.get(loginAliasKey(username)) : null;
+  if (!shouldBypassAuthRateLimit(env, request)) {
+    const limiterKey = buildLimiterKey(request, "signup", username);
+    const limited = await checkRateLimit(env, limiterKey, RATE_LIMIT_MAX_BY_ACTION.signup);
+    if (limited.blocked) {
+      return jsonResponse({ error: "Too many attempts. Try again later." }, 429, {
+        "Retry-After": String(limited.retryAfter)
+      });
+    }
+  }
+
+  const existingEmail = await getLoginAlias(env, username);
   if (existingEmail) {
     if (!env.SUPABASE_SERVICE_ROLE_KEY) {
       return jsonResponse({ error: "Username is already taken." }, 400);
@@ -290,7 +299,6 @@ async function handleAuthDelete(request, env) {
   if (!token) {
     return jsonResponse({ error: "Missing token." }, 401);
   }
-
   const currentUser = await fetchSupabaseUser(env, token);
   if (!currentUser?.id) {
     return jsonResponse({ error: "Could not verify user." }, 401);
@@ -485,6 +493,8 @@ async function handleAuthUpdate(request, env) {
   const username = payload?.username === undefined ? "" : normalizeUsername(payload?.username);
   const email = payload?.email === undefined ? undefined : normalizeEmail(payload?.email, false);
   const password = payload?.password === undefined ? "" : String(payload?.password || "");
+  const preferredServer = payload?.preferredServer === undefined ? "" : normalizeServerId(payload?.preferredServer);
+  const notificationReadIds = payload?.notificationReadIds === undefined ? null : normalizeStringList(payload?.notificationReadIds, 200, 160);
   const currentPassword = String(payload?.currentPassword || "");
   const recoveryMode = payload?.recovery === true;
 
@@ -496,8 +506,29 @@ async function handleAuthUpdate(request, env) {
     data.avatarId = avatarId;
   }
 
+  if (payload?.preferredServer !== undefined) {
+    if (!preferredServer) return jsonResponse({ error: "Invalid preferred server." }, 400);
+    data.preferredServer = preferredServer;
+  }
+
+  if (payload?.notificationReadIds !== undefined) {
+    data.notificationReadIds = notificationReadIds;
+  }
+
   if (payload?.username !== undefined) {
     if (!username) return jsonResponse({ error: "Invalid username." }, 400);
+    if (username !== normalizeUsername(currentUser.user_metadata?.username)) {
+      const existingEmail = await getLoginAlias(env, username);
+      if (existingEmail && normalizeEmail(existingEmail, false) !== normalizeEmail(currentUser.email, false)) {
+        if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+          return jsonResponse({ error: "Username is already taken." }, 400);
+        }
+        const existingUser = await fetchSupabaseUserByEmail(env, existingEmail);
+        if (existingUser?.id && existingUser.id !== currentUser.id) {
+          return jsonResponse({ error: "Username is already taken." }, 400);
+        }
+      }
+    }
     data.username = username;
     data.name = username;
     data.display_name = username;
@@ -524,7 +555,10 @@ async function handleAuthUpdate(request, env) {
   }
 
   if (Object.keys(data).length) {
-    update.data = data;
+    update.data = {
+      ...(currentUser.user_metadata || {}),
+      ...data
+    };
   }
 
   if (!Object.keys(update).length) {
@@ -596,7 +630,7 @@ async function handleAuthUpdate(request, env) {
   return response;
 }
 
-async function handleProgressPull(request, env, url) {
+async function handleNotificationReadState(request, env) {
   if (request.method !== "GET" && request.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
@@ -606,6 +640,52 @@ async function handleProgressPull(request, env, url) {
     return jsonResponse({ error: "Missing token." }, 401);
   }
 
+  const currentUser = await fetchSupabaseUser(env, token);
+  if (!currentUser?.id) {
+    return jsonResponse({ error: "Could not verify user." }, 401);
+  }
+
+  const currentIds = normalizeStringList(currentUser.user_metadata?.notificationReadIds, 500, 180);
+  if (request.method === "GET") {
+    return jsonResponse({ notificationReadIds: currentIds });
+  }
+
+  const payload = await readJson(request);
+  const incomingIds = normalizeStringList(payload?.notificationReadIds, 500, 180);
+  const merged = [...new Set([...currentIds, ...incomingIds])].slice(-500);
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+    method: "PUT",
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      data: {
+        ...(currentUser.user_metadata || {}),
+        notificationReadIds: merged
+      }
+    })
+  });
+
+  if (!response.ok) return proxyJson(response);
+  return jsonResponse({ ok: true, notificationReadIds: merged });
+}
+
+async function handleProgressPull(request, env, url) {
+  if (request.method !== "GET" && request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  const token = getBearerToken(request);
+  if (!token) {
+    return jsonResponse({ error: "Missing token." }, 401);
+  }
+  const user = await fetchSupabaseUser(env, token);
+  if (!user?.id) {
+    return jsonResponse({ error: "Could not verify user." }, 401);
+  }
+
   const limitParam = request.method === "POST"
     ? Number((await readJson(request))?.limit || 500)
     : Number(url.searchParams.get("limit") || 500);
@@ -613,6 +693,7 @@ async function handleProgressPull(request, env, url) {
 
   const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/watch_progress`);
   apiUrl.searchParams.set("select", "media_type,content_id,season_number,episode_number,timestamp_seconds,duration_seconds,progress_percent,updated_at");
+  apiUrl.searchParams.set("user_id", `eq.${user.id}`);
   apiUrl.searchParams.set("order", "updated_at.desc");
   apiUrl.searchParams.set("limit", String(limit));
 
@@ -632,12 +713,35 @@ async function handleProgressPush(request, env) {
   if (!token) {
     return jsonResponse({ error: "Missing token." }, 401);
   }
+  const user = await fetchSupabaseUser(env, token);
+  if (!user?.id) {
+    return jsonResponse({ error: "Could not verify user." }, 401);
+  }
 
   const payload = await readJson(request);
-  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const rows = (Array.isArray(payload?.rows) ? payload.rows : [])
+    .map((row) => normalizeProgressRow(row, user.id))
+    .filter(Boolean);
 
   if (!rows.length || rows.length > 240) {
-    return jsonResponse({ error: "Invalid payload." }, 400);
+    return jsonResponse({ error: "Invalid payload. Expected 1-240 rows.", received: Array.isArray(payload?.rows) ? payload.rows.length : 0 }, 400);
+  }
+
+  const existingProgressMap = await fetchExistingProgressRows(env, token, user.id, rows);
+  const freshRows = rows.filter((row) => {
+    const mediaType = row?.media_type === "tv" ? "tv" : "movie";
+    const contentId = Number(row?.content_id || 0);
+    if (!contentId) return false;
+    const season = mediaType === "tv" ? Number(row?.season_number || 1) || 1 : 1;
+    const episode = mediaType === "tv" ? Number(row?.episode_number || 1) || 1 : 1;
+    const incomingUpdatedAt = Date.parse(row?.updated_at || "") || 0;
+    const key = `${mediaType}:${contentId}:${season}:${episode}`;
+    const existingUpdatedAt = existingProgressMap.get(key) || 0;
+    return !existingUpdatedAt || incomingUpdatedAt >= existingUpdatedAt;
+  });
+
+  if (!freshRows.length) {
+    return jsonResponse({ ok: true, skipped: rows.length });
   }
 
   const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/watch_progress`);
@@ -649,7 +753,7 @@ async function handleProgressPush(request, env) {
       Prefer: "resolution=merge-duplicates,return=minimal",
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(rows)
+    body: JSON.stringify(freshRows)
   });
 
   if (!response.ok) {
@@ -668,6 +772,10 @@ async function handleBookmarksPull(request, env, url) {
   if (!token) {
     return jsonResponse({ error: "Missing token." }, 401);
   }
+  const user = await fetchSupabaseUser(env, token);
+  if (!user?.id) {
+    return jsonResponse({ error: "Could not verify user." }, 401);
+  }
 
   const limitParam = request.method === "POST"
     ? Number((await readJson(request))?.limit || 500)
@@ -676,6 +784,7 @@ async function handleBookmarksPull(request, env, url) {
 
   const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
   apiUrl.searchParams.set("select", "media_type,content_id,status,title,poster,updated_at");
+  apiUrl.searchParams.set("user_id", `eq.${user.id}`);
   apiUrl.searchParams.set("order", "updated_at.desc");
   apiUrl.searchParams.set("limit", String(limit));
 
@@ -697,10 +806,31 @@ async function handleBookmarksPush(request, env) {
   }
 
   const payload = await readJson(request);
-  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const user = await fetchSupabaseUser(env, token);
+  if (!user?.id) {
+    return jsonResponse({ error: "Could not verify user." }, 401);
+  }
+  const rows = (Array.isArray(payload?.rows) ? payload.rows : [])
+    .map((row) => normalizeBookmarkRow(row, user.id))
+    .filter(Boolean);
 
   if (!rows.length || rows.length > 240) {
     return jsonResponse({ error: "Invalid payload." }, 400);
+  }
+
+  const existingBookmarkMap = await fetchExistingBookmarkRows(env, token, user.id, rows);
+  const freshRows = rows.filter((row) => {
+    const mediaType = row?.media_type === "tv" ? "tv" : "movie";
+    const contentId = Number(row?.content_id || 0);
+    if (!contentId) return false;
+    const incomingUpdatedAt = Date.parse(row?.updated_at || "") || 0;
+    const key = `${mediaType}:${contentId}`;
+    const existingUpdatedAt = existingBookmarkMap.get(key) || 0;
+    return !existingUpdatedAt || incomingUpdatedAt >= existingUpdatedAt;
+  });
+
+  if (!freshRows.length) {
+    return jsonResponse({ ok: true, skipped: rows.length });
   }
 
   const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
@@ -712,14 +842,192 @@ async function handleBookmarksPush(request, env) {
       Prefer: "resolution=merge-duplicates,return=minimal",
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(rows)
+    body: JSON.stringify(freshRows)
   });
 
   if (!response.ok) {
     return proxyJson(response);
   }
 
-  return jsonResponse({ ok: true });
+  return jsonResponse({ ok: true, skipped: rows.length - freshRows.length });
+}
+
+async function handleProgressDelete(request, env) {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  const token = getBearerToken(request);
+  if (!token) {
+    return jsonResponse({ error: "Missing token." }, 401);
+  }
+
+  const user = await fetchSupabaseUser(env, token);
+  if (!user?.id) {
+    return jsonResponse({ error: "Could not verify user." }, 401);
+  }
+
+  const payload = await readJson(request);
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  const rows = entries.map((entry) => {
+    const mediaType = entry?.media_type === "tv" ? "tv" : "movie";
+    const contentId = Number(entry?.content_id || 0);
+    if (!contentId) return null;
+    return {
+      user_id: user.id,
+      media_type: mediaType,
+      content_id: contentId,
+      season_number: mediaType === "tv" ? Number(entry?.season_number || 1) || 1 : 1,
+      episode_number: mediaType === "tv" ? Number(entry?.episode_number || 1) || 1 : 1,
+      timestamp_seconds: 0,
+      duration_seconds: 0,
+      progress_percent: 100,
+      updated_at: new Date().toISOString()
+    };
+  }).filter(Boolean).slice(0, 240);
+
+  if (!rows.length) {
+    return jsonResponse({ error: "Invalid progress entries." }, 400);
+  }
+
+  for (const row of rows) {
+    const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/watch_progress`);
+    apiUrl.searchParams.set("user_id", `eq.${user.id}`);
+    apiUrl.searchParams.set("media_type", `eq.${row.media_type}`);
+    apiUrl.searchParams.set("content_id", `eq.${row.content_id}`);
+    apiUrl.searchParams.set("season_number", `eq.${row.season_number}`);
+    apiUrl.searchParams.set("episode_number", `eq.${row.episode_number}`);
+
+    const response = await fetch(apiUrl, {
+      method: "DELETE",
+      headers: {
+        ...supabaseHeaders(env, token),
+        Prefer: "return=minimal"
+      }
+    });
+
+    if (!response.ok) {
+      return proxyJson(response);
+    }
+  }
+
+  return jsonResponse({ ok: true, deleted: rows.length });
+}
+
+async function shouldAcceptProgressRow(env, token, userId, row) {
+  const mediaType = row?.media_type === "tv" ? "tv" : "movie";
+  const contentId = Number(row?.content_id || 0);
+  if (!contentId) return false;
+  const season = mediaType === "tv" ? Number(row?.season_number || 1) || 1 : 1;
+  const episode = mediaType === "tv" ? Number(row?.episode_number || 1) || 1 : 1;
+  const incomingUpdatedAt = Date.parse(row?.updated_at || "") || 0;
+
+  const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/watch_progress`);
+  apiUrl.searchParams.set("select", "updated_at");
+  apiUrl.searchParams.set("user_id", `eq.${userId}`);
+  apiUrl.searchParams.set("media_type", `eq.${mediaType}`);
+  apiUrl.searchParams.set("content_id", `eq.${contentId}`);
+  apiUrl.searchParams.set("season_number", `eq.${season}`);
+  apiUrl.searchParams.set("episode_number", `eq.${episode}`);
+  apiUrl.searchParams.set("limit", "1");
+
+  const response = await fetch(apiUrl.toString(), {
+    headers: supabaseHeaders(env, token)
+  });
+  if (!response.ok) return true;
+
+  const existing = await response.json().catch(() => []);
+  const existingUpdatedAt = Date.parse(existing?.[0]?.updated_at || "") || 0;
+  return !existingUpdatedAt || incomingUpdatedAt >= existingUpdatedAt;
+}
+
+async function shouldAcceptBookmarkRow(env, token, userId, row) {
+  const mediaType = row?.media_type === "tv" ? "tv" : "movie";
+  const contentId = Number(row?.content_id || 0);
+  if (!contentId) return false;
+  const incomingUpdatedAt = Date.parse(row?.updated_at || "") || 0;
+
+  const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
+  apiUrl.searchParams.set("select", "updated_at");
+  apiUrl.searchParams.set("user_id", `eq.${userId}`);
+  apiUrl.searchParams.set("media_type", `eq.${mediaType}`);
+  apiUrl.searchParams.set("content_id", `eq.${contentId}`);
+  apiUrl.searchParams.set("limit", "1");
+
+  const response = await fetch(apiUrl.toString(), {
+    headers: supabaseHeaders(env, token)
+  });
+  if (!response.ok) return true;
+
+  const existing = await response.json().catch(() => []);
+  const existingUpdatedAt = Date.parse(existing?.[0]?.updated_at || "") || 0;
+  return !existingUpdatedAt || incomingUpdatedAt >= existingUpdatedAt;
+}
+
+async function fetchExistingProgressRows(env, token, userId, rows) {
+  const ids = [...new Set((rows || []).map((row) => Number(row?.content_id || 0)).filter(Boolean))];
+  const map = new Map();
+  if (!ids.length) return map;
+
+  const batchSize = 40;
+  for (let index = 0; index < ids.length; index += batchSize) {
+    const batch = ids.slice(index, index + batchSize).join(",");
+    const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/watch_progress`);
+    apiUrl.searchParams.set("select", "media_type,content_id,season_number,episode_number,updated_at");
+    apiUrl.searchParams.set("user_id", `eq.${userId}`);
+    apiUrl.searchParams.set("content_id", `in.(${batch})`);
+    const response = await fetch(apiUrl.toString(), {
+      headers: supabaseHeaders(env, token)
+    });
+    if (!response.ok) continue;
+    const existing = await response.json().catch(() => []);
+    (existing || []).forEach((row) => {
+      const mediaType = row?.media_type === "tv" ? "tv" : "movie";
+      const contentId = Number(row?.content_id || 0);
+      if (!contentId) return;
+      const season = mediaType === "tv" ? Number(row?.season_number || 1) || 1 : 1;
+      const episode = mediaType === "tv" ? Number(row?.episode_number || 1) || 1 : 1;
+      const key = `${mediaType}:${contentId}:${season}:${episode}`;
+      const updatedAt = Date.parse(row?.updated_at || "") || 0;
+      if (!map.has(key) || updatedAt > map.get(key)) {
+        map.set(key, updatedAt);
+      }
+    });
+  }
+
+  return map;
+}
+
+async function fetchExistingBookmarkRows(env, token, userId, rows) {
+  const ids = [...new Set((rows || []).map((row) => Number(row?.content_id || 0)).filter(Boolean))];
+  const map = new Map();
+  if (!ids.length) return map;
+
+  const batchSize = 60;
+  for (let index = 0; index < ids.length; index += batchSize) {
+    const batch = ids.slice(index, index + batchSize).join(",");
+    const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
+    apiUrl.searchParams.set("select", "media_type,content_id,updated_at");
+    apiUrl.searchParams.set("user_id", `eq.${userId}`);
+    apiUrl.searchParams.set("content_id", `in.(${batch})`);
+    const response = await fetch(apiUrl.toString(), {
+      headers: supabaseHeaders(env, token)
+    });
+    if (!response.ok) continue;
+    const existing = await response.json().catch(() => []);
+    (existing || []).forEach((row) => {
+      const mediaType = row?.media_type === "tv" ? "tv" : "movie";
+      const contentId = Number(row?.content_id || 0);
+      if (!contentId) return;
+      const key = `${mediaType}:${contentId}`;
+      const updatedAt = Date.parse(row?.updated_at || "") || 0;
+      if (!map.has(key) || updatedAt > map.get(key)) {
+        map.set(key, updatedAt);
+      }
+    });
+  }
+
+  return map;
 }
 
 async function handleBookmarksDelete(request, env) {
@@ -739,11 +1047,18 @@ async function handleBookmarksDelete(request, env) {
     return jsonResponse({ error: "Invalid bookmark." }, 400);
   }
 
+  const user = await fetchSupabaseUser(env, token);
+  if (!user?.id) {
+    return jsonResponse({ error: "Could not verify user." }, 401);
+  }
+
+  // Perform a real DELETE so the bookmark is removed server-side.
   const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
+  apiUrl.searchParams.set("user_id", `eq.${user.id}`);
   apiUrl.searchParams.set("media_type", `eq.${mediaType}`);
   apiUrl.searchParams.set("content_id", `eq.${contentId}`);
 
-  const response = await fetch(apiUrl, {
+  const response = await fetch(apiUrl.toString(), {
     method: "DELETE",
     headers: {
       ...supabaseHeaders(env, token),
@@ -751,16 +1066,23 @@ async function handleBookmarksDelete(request, env) {
     }
   });
 
-  if (!response.ok) {
-    return proxyJson(response);
-  }
-
-  return jsonResponse({ ok: true });
+  if (!response.ok) return proxyJson(response);
+  return jsonResponse({ ok: true, deleted: 1 });
 }
 
 async function handleReportSubmit(request, env) {
   if (request.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (!shouldBypassAuthRateLimit(env, request)) {
+    const ip = getClientIp(request) || "unknown";
+    const limited = await checkRateLimit(env, `rl:report:${ip}`, 5);
+    if (limited.blocked) {
+      return jsonResponse({ error: "Too many reports. Try again later." }, 429, {
+        "Retry-After": String(limited.retryAfter)
+      });
+    }
   }
 
   const payload = await readJson(request);
@@ -776,7 +1098,7 @@ async function handleReportSubmit(request, env) {
     userId = user?.id || "";
   }
 
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY || !token || !userId) {
     return jsonResponse({ ok: true, stored: "local-only" });
   }
 
@@ -789,8 +1111,7 @@ async function handleReportSubmit(request, env) {
   const response = await fetch(`${env.SUPABASE_URL}/rest/v1/reports`, {
     method: "POST",
     headers: {
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      ...supabaseHeaders(env, token),
       Prefer: "return=minimal",
       "Content-Type": "application/json"
     },
@@ -835,13 +1156,22 @@ async function checkRateLimit(env, key, maxAttempts = RATE_LIMIT_MAX) {
   }
 
   const now = Date.now();
-  const existing = await env.RATE_LIMIT_KV.get(key, "json");
+  let existing = null;
+  try {
+    existing = await env.RATE_LIMIT_KV.get(key, "json");
+  } catch {
+    return { blocked: false, retryAfter: 0 };
+  }
 
   if (!existing || now >= existing.resetAt) {
     const record = { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
-    await env.RATE_LIMIT_KV.put(key, JSON.stringify(record), {
-      expirationTtl: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
-    });
+    try {
+      await env.RATE_LIMIT_KV.put(key, JSON.stringify(record), {
+        expirationTtl: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+      });
+    } catch {
+      return { blocked: false, retryAfter: 0 };
+    }
     return { blocked: false, retryAfter: 0 };
   }
 
@@ -851,9 +1181,13 @@ async function checkRateLimit(env, key, maxAttempts = RATE_LIMIT_MAX) {
   }
 
   const record = { ...existing, count: existing.count + 1 };
-  await env.RATE_LIMIT_KV.put(key, JSON.stringify(record), {
-    expirationTtl: Math.ceil((existing.resetAt - now) / 1000)
-  });
+  try {
+    await env.RATE_LIMIT_KV.put(key, JSON.stringify(record), {
+      expirationTtl: Math.max(60, Math.ceil((existing.resetAt - now) / 1000))
+    });
+  } catch {
+    return { blocked: false, retryAfter: 0 };
+  }
 
   return { blocked: false, retryAfter: 0 };
 }
@@ -1011,8 +1345,7 @@ async function resolveLoginEmail(env, identifier) {
   if (!identifier) return "";
   if (identifier.includes("@")) return identifier;
 
-  const key = loginAliasKey(identifier);
-  const mapped = env.RATE_LIMIT_KV?.get ? await env.RATE_LIMIT_KV.get(key) : "";
+  const mapped = await getLoginAlias(env, identifier);
   return mapped || internalEmailForUsername(identifier);
 }
 
@@ -1022,24 +1355,42 @@ async function resolveLoginEmails(env, identifier) {
 
   const internalEmail = internalEmailForUsername(identifier);
   const legacyInternalEmail = `${identifier}@cinerune.user`;
-  const mapped = env.RATE_LIMIT_KV?.get ? await env.RATE_LIMIT_KV.get(loginAliasKey(identifier)) : "";
+  const mapped = await getLoginAlias(env, identifier);
   return [mapped, internalEmail, legacyInternalEmail].filter((email, index, emails) => {
     const normalized = normalizeEmail(email, false);
     return normalized && emails.indexOf(email) === index;
   });
 }
 
+async function getLoginAlias(env, username) {
+  const normalizedUsername = normalizeUsername(username);
+  if (!env.RATE_LIMIT_KV?.get || !normalizedUsername) return "";
+  try {
+    return await env.RATE_LIMIT_KV.get(loginAliasKey(normalizedUsername));
+  } catch {
+    return "";
+  }
+}
+
 async function storeLoginAliases(env, username, email) {
   const normalizedUsername = normalizeUsername(username);
   const normalizedEmail = normalizeEmail(email, false);
   if (!env.RATE_LIMIT_KV?.put || !normalizedUsername || !normalizedEmail) return;
-  await env.RATE_LIMIT_KV.put(loginAliasKey(normalizedUsername), normalizedEmail);
+  try {
+    await env.RATE_LIMIT_KV.put(loginAliasKey(normalizedUsername), normalizedEmail);
+  } catch {
+    // Login can still proceed with Supabase auth if KV alias caching is temporarily unavailable.
+  }
 }
 
 async function deleteLoginAlias(env, username) {
   const normalizedUsername = normalizeUsername(username);
   if (!env.RATE_LIMIT_KV?.delete || !normalizedUsername) return;
-  await env.RATE_LIMIT_KV.delete(loginAliasKey(normalizedUsername));
+  try {
+    await env.RATE_LIMIT_KV.delete(loginAliasKey(normalizedUsername));
+  } catch {
+    // Account deletion should not fail solely because KV alias cleanup is unavailable.
+  }
 }
 
 async function deleteUserProgress(env, userId) {
@@ -1093,6 +1444,14 @@ function normalizeEmail(value, allowBlank = false) {
   if (!trimmed) return allowBlank ? "" : null;
   if (trimmed.length > 80) return null;
   return /.+@.+\..+/.test(trimmed) ? trimmed : null;
+}
+
+function normalizeServerId(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "videasy") return "videasy";
+  if (normalized === "vidrock") return "vidrock";
+  if (normalized === "vidking") return "vidking";
+  return "";
 }
 
 function internalEmailForUsername(username) {
@@ -1169,6 +1528,71 @@ async function proxyJson(response, headers = {}) {
   });
 }
 
+function normalizeStringList(value, maxItems, maxLength) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => String(entry || "").trim().slice(0, maxLength))
+    .filter(Boolean)
+    .slice(-maxItems);
+}
+
+function normalizeProgressRow(row, userId) {
+  const mediaType = row?.media_type === "tv" ? "tv" : "movie";
+  const contentId = Number(row?.content_id || 0);
+  if (!userId || !Number.isInteger(contentId) || contentId < 1) return null;
+  const season = mediaType === "tv" ? clampInteger(row?.season_number, 1, 10000, 1) : 1;
+  const episode = mediaType === "tv" ? clampInteger(row?.episode_number, 1, 100000, 1) : 1;
+  const timestamp = clampNumber(row?.timestamp_seconds, 0, 60 * 60 * 24, 0);
+  const duration = clampNumber(row?.duration_seconds, 0, 60 * 60 * 24, 0);
+  const progress = clampNumber(row?.progress_percent, 0, 100, 0);
+  return {
+    user_id: userId,
+    media_type: mediaType,
+    content_id: contentId,
+    season_number: season,
+    episode_number: episode,
+    timestamp_seconds: timestamp,
+    duration_seconds: duration,
+    progress_percent: progress,
+    updated_at: normalizeIsoDate(row?.updated_at)
+  };
+}
+
+function normalizeBookmarkRow(row, userId) {
+  const mediaType = row?.media_type === "tv" ? "tv" : "movie";
+  const contentId = Number(row?.content_id || 0);
+  if (!userId || !Number.isInteger(contentId) || contentId < 1) return null;
+  const status = ["watching", "watched", "plan", "dropped", "deleted"].includes(row?.status)
+    ? row.status
+    : "watching";
+  return {
+    user_id: userId,
+    media_type: mediaType,
+    content_id: contentId,
+    status,
+    title: String(row?.title || "").trim().slice(0, 240),
+    poster: String(row?.poster || "").trim().slice(0, 600),
+    updated_at: normalizeIsoDate(row?.updated_at)
+  };
+}
+
+function clampInteger(value, min, max, fallback) {
+  const number = Math.trunc(Number(value));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+function normalizeIsoDate(value) {
+  const timestamp = Date.parse(value || "");
+  return new Date(Number.isFinite(timestamp) ? timestamp : Date.now()).toISOString();
+}
+
 async function deleteUserBookmarks(env, userId) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !userId) return;
   const apiUrl = new URL(`${env.SUPABASE_URL}/rest/v1/bookmarks`);
@@ -1191,10 +1615,30 @@ function safeParseJson(text) {
   }
 }
 
-function withCors(response, origin) {
-  response.headers.set("Access-Control-Allow-Origin", origin);
+function withCors(response, origin, env, requestOrigin) {
+  const allowedOrigin = getAllowedCorsOrigin(origin, env, requestOrigin);
+  if (!allowedOrigin) return response;
+  response.headers.set("Access-Control-Allow-Origin", allowedOrigin);
   response.headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
   response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   response.headers.set("Vary", "Origin");
   return response;
+}
+
+function getAllowedCorsOrigin(origin, env, requestOrigin) {
+  const value = String(origin || "").trim();
+  if (!value || value === "null" || value === "*") return requestOrigin || "";
+  const allowed = new Set([
+    String(env.SITE_URL || "").trim().replace(/\/$/, ""),
+    String(requestOrigin || "").trim().replace(/\/$/, "")
+  ].filter(Boolean));
+  try {
+    const parsed = new URL(value);
+    const normalized = parsed.origin;
+    const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(parsed.hostname)
+      || parsed.hostname.endsWith(".local");
+    return allowed.has(normalized) || isLocal ? normalized : "";
+  } catch {
+    return "";
+  }
 }

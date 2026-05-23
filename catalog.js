@@ -16,9 +16,16 @@ let countryCache = null;
 const searchCache = new Map();
 const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
 const SEASON_EPISODE_CACHE_TTL_MS = 10 * 60 * 1000;
+const DATAMUSE_TIMEOUT_MS = 1200;
 
 const sensitiveExactTitles = new Set([
+  "hayok",
+  "tayuan 2",
   "overflow"
+]);
+const blockedTitleKeys = new Set([
+  "movie:321739",
+  "tv:321739"
 ]);
 
 const sensitiveTextTerms = [
@@ -41,6 +48,8 @@ const sensitiveTextTerms = [
   "nude",
   "nudity"
 ];
+const blockedKeywordIds = new Set([321739]);
+const blockedKeywordParam = [...blockedKeywordIds].join(",");
 
 const fallbackMovieGenres = [
   { id: 28, name: "Action" },
@@ -198,70 +207,52 @@ export async function fetchHomeCatalog() {
   };
 }
 
-export async function fetchRecommendedFromHistory(entries = [], limit = 24) {
-  const seeds = dedupeHistoryEntries(entries).slice(0, 12);
+export async function fetchRecommendedFromHistory(entries = [], limit = 24, options = {}) {
+  const history = dedupeHistoryEntries(entries);
+  const seedLimit = Math.max(1, Math.min(10, Number(options.seedLimit || 5)));
+  const seeds = history.slice(0, seedLimit);
   if (!seeds.length) return [];
 
-  const hydratedSeeds = (await Promise.all(seeds.map(async (entry) => {
+  const excludedKeys = new Set(history.map((entry) => `${entry.mediaType === "tv" ? "tv" : "movie"}:${Number(entry.id || 0)}`));
+  const seedRequests = seeds.map((entry) => {
     const mediaType = entry.mediaType === "tv" ? "tv" : "movie";
     const id = Number(entry.id || 0);
-    if (!id) return null;
-
-    try {
-      return getItemById(id, mediaType) || await fetchItemDetailsById(id, mediaType);
-    } catch {
-      return getItemById(id, mediaType) || null;
-    }
-  }))).filter(Boolean);
-
-  if (!hydratedSeeds.length) return [];
-
-  const genreWeights = new Map();
-  const seenKeys = new Set(seeds.map((entry) => `${entry.mediaType === "tv" ? "tv" : "movie"}:${Number(entry.id || 0)}`));
-
-  hydratedSeeds.forEach((item, index) => {
-    const recencyBoost = Math.max(1, hydratedSeeds.length - index);
-    const popularityBoost = Math.max(1, Math.round(Number(item.popularity || 0) / 50));
-    const weight = recencyBoost + popularityBoost;
-    (item.genreIds || []).forEach((genreId) => {
-      genreWeights.set(genreId, (genreWeights.get(genreId) || 0) + weight);
-    });
+    if (!id) return Promise.resolve({ results: [] });
+    return tmdbRequest(`/${mediaType}/${id}/recommendations`).catch(() => ({ results: [] }));
   });
 
-  const topGenres = [...genreWeights.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([genreId]) => genreId);
+  const responseSets = await Promise.all(seedRequests);
+  let candidates = dedupeByKey(responseSets.flatMap((result) => normalizeList(result.results || [])))
+    .filter((item) => !excludedKeys.has(`${item.mediaType}:${item.id}`));
 
-  if (!topGenres.length) return [];
-
-  const preferredMediaType = pickPreferredMediaType(seeds);
-  const requestTypes = preferredMediaType === "mixed"
-    ? ["movie", "tv"]
-    : [preferredMediaType, preferredMediaType === "movie" ? "tv" : "movie"];
-
-  const requests = [];
-  requestTypes.forEach((mediaType) => {
-    topGenres.slice(0, 3).forEach((genreId, index) => {
-      requests.push(
-        tmdbRequest(mediaType === "movie" ? "/discover/movie" : "/discover/tv", {
-          with_genres: genreId,
-          include_adult: "false",
-          sort_by: "popularity.desc",
-          page: index + 1
-        }).catch(() => ({ results: [] }))
-      );
+  if (candidates.length < 10) {
+    const similarRequests = seeds.map((entry) => {
+      const mediaType = entry.mediaType === "tv" ? "tv" : "movie";
+      const id = Number(entry.id || 0);
+      if (!id) return Promise.resolve({ results: [] });
+      return tmdbRequest(`/${mediaType}/${id}/similar`).catch(() => ({ results: [] }));
     });
-  });
+    const similarSets = await Promise.all(similarRequests);
+    candidates = dedupeByKey([
+      ...candidates,
+      ...similarSets.flatMap((result) => normalizeList(result.results || []))
+    ]).filter((item) => !excludedKeys.has(`${item.mediaType}:${item.id}`));
+  }
 
-  const responseSets = await Promise.all(requests);
-  const candidates = dedupeByKey(responseSets.flatMap((result) => normalizeList(result.results || [])))
-    .filter((item) => !seenKeys.has(`${item.mediaType}:${item.id}`))
-    .sort((a, b) => scoreRecommendationCandidate(b, genreWeights, preferredMediaType) - scoreRecommendationCandidate(a, genreWeights, preferredMediaType))
-    .slice(0, limit);
+  const shuffled = shuffleRecommendations(candidates).slice(0, limit);
+  cacheItems(shuffled);
+  return shuffled;
+}
 
-  cacheItems(candidates);
-  return candidates;
+function shuffleRecommendations(items) {
+  const pool = [...(items || [])];
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    const temp = pool[index];
+    pool[index] = pool[swap];
+    pool[swap] = temp;
+  }
+  return pool;
 }
 
 export async function fetchGenreOptions() {
@@ -290,6 +281,7 @@ export async function fetchCountryOptions() {
         name: String(entry.english_name || entry.native_name || "").trim()
       }))
       .filter((entry) => entry.code && entry.name)
+      .filter((entry) => entry.code !== "DD" && !/east germany/i.test(entry.name))
       .sort((a, b) => a.name.localeCompare(b.name));
   } catch {
     countries = [
@@ -346,6 +338,7 @@ async function fetchGenreDiscovery(mediaType, genreId, keywordIds, genreName, pa
   const path = mediaType === "tv" ? "/discover/tv" : "/discover/movie";
   const params = {
     include_adult: "false",
+    without_keywords: blockedKeywordParam,
     sort_by: "popularity.desc",
     page
   };
@@ -401,6 +394,66 @@ export async function fetchTrendingMovies(page = 1) {
   };
 }
 
+export async function fetchTrendingPage(mediaType = "movie", page = 1) {
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  return fetchTmdbListPage(`/trending/${normalizedType}/week`, normalizedType, page);
+}
+
+export async function fetchPopularPage(mediaType = "movie", page = 1) {
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  return fetchTmdbListPage(`/${normalizedType}/popular`, normalizedType, page);
+}
+
+export async function fetchAiringTodayPage(page = 1) {
+  return fetchTmdbListPage("/tv/airing_today", "tv", page);
+}
+
+export async function fetchCountryContentCounts(countryCode) {
+  const code = String(countryCode || "").trim().toUpperCase();
+  if (!code) return { movie: 0, tv: 0, total: 0 };
+
+  const [movieData, tvData] = await Promise.all([
+    tmdbRequest("/discover/movie", {
+      with_origin_country: code,
+      without_keywords: blockedKeywordParam,
+      include_adult: "false",
+      sort_by: "popularity.desc",
+      page: 1
+    }).catch(() => ({ total_results: 0 })),
+    tmdbRequest("/discover/tv", {
+      with_origin_country: code,
+      without_keywords: blockedKeywordParam,
+      include_adult: "false",
+      sort_by: "popularity.desc",
+      page: 1
+    }).catch(() => ({ total_results: 0 }))
+  ]);
+
+  const movie = Math.max(0, Number(movieData.total_results || 0) || 0);
+  const tv = Math.max(0, Number(tvData.total_results || 0) || 0);
+  return { movie, tv, total: movie + tv };
+}
+
+async function fetchTmdbListPage(path, mediaType, page = 1) {
+  const safePage = Math.max(1, Math.min(500, Number(page || 1)));
+  const data = await tmdbRequest(path, {
+    include_adult: "false",
+    without_keywords: blockedKeywordParam,
+    page: safePage
+  });
+  const items = normalizeList((data.results || []).map((item) => ({
+    ...item,
+    media_type: mediaType
+  })));
+  cacheItems(items);
+  return {
+    items,
+    page: safePage,
+    totalPages: Math.max(1, Math.min(500, Number(data.total_pages || 1) || 1)),
+    totalResults: Math.max(0, Number(data.total_results || 0) || 0)
+  };
+}
+
 export async function fetchTitlesByCountry(countryCode, page = 1) {
   const code = String(countryCode || "").trim().toUpperCase();
   if (!code) return { movies: [], tv: [], page: 1, totalPages: 1 };
@@ -425,6 +478,7 @@ async function fetchCountryMedia(mediaType, countryCode, page) {
   const firstPage = await tmdbRequest(path, {
     with_origin_country: countryCode,
     include_adult: "false",
+    without_keywords: blockedKeywordParam,
     sort_by: "popularity.desc",
     page
   });
@@ -444,6 +498,7 @@ async function fetchCountryMedia(mediaType, countryCode, page) {
       tmdbRequest(path, {
         with_origin_country: countryCode,
         include_adult: "false",
+        without_keywords: blockedKeywordParam,
         sort_by: "popularity.desc",
         page: nextPage
       }).catch(() => ({ results: [] }))
@@ -544,13 +599,48 @@ export async function searchCatalog(query, options = {}) {
     return cached.result;
   }
 
-  let responses = await searchTmdbPages(text, page, requestedPages);
+  const originalResponses = await searchTmdbPages(text, page, requestedPages);
+  const originalItems = dedupeByKey(originalResponses.flatMap((response) => normalizeList(response.results || [], {
+    allowSensitiveExact: true,
+    query: text
+  })));
+  const normalizedOriginal = normalizeSearchText(text);
+  const originalWords = normalizedOriginal.split(" ").filter(Boolean);
+  const originalWordsPresent = originalWords.length
+    ? originalWords.every((word) => originalItems.some((item) => normalizeSearchText(item.title).includes(word)))
+    : true;
+
+  let queryVariants = [text];
+  let correctedQuery = "";
+  let responses = originalResponses;
+
+  if (!originalWordsPresent) {
+    const rawVariants = await buildSearchQueryVariants(text).catch(() => [text]);
+    const originalWordCount = originalWords.length;
+    queryVariants = rawVariants.filter((variant) => {
+      const normalizedVariant = normalizeSearchText(variant);
+      if (normalizedVariant === normalizedOriginal) return true;
+      const count = normalizedVariant.split(" ").filter(Boolean).length;
+      if (count !== originalWordCount) return false;
+      return normalizedVariant.length >= normalizedOriginal.length;
+    });
+    if (!queryVariants.length) {
+      queryVariants = [text];
+    }
+    correctedQuery = queryVariants.find((entry) => normalizeSearchText(entry) !== normalizedOriginal) || "";
+    if (queryVariants.length > 1) {
+      const responseSets = await Promise.all(
+        queryVariants.map((variant) => searchTmdbPages(variant, page, requestedPages))
+      );
+      responses = responseSets.flat();
+    }
+  }
 
   let normalized = dedupeByKey(responses.flatMap((response) => normalizeList(response.results || [], {
     allowSensitiveExact: true,
     query: text
   })))
-    .sort((a, b) => scoreSearchResult(b, text) - scoreSearchResult(a, text));
+    .sort((a, b) => scoreSearchCandidate(b, queryVariants) - scoreSearchCandidate(a, queryVariants));
 
   if (sensitiveQuery) {
     normalized = isGenericSensitiveSearchQuery(text)
@@ -564,6 +654,10 @@ export async function searchCatalog(query, options = {}) {
     1,
     ...responses.map((response) => Number(response.total_pages || 1) || 1)
   );
+  const totalResults = Math.max(
+    normalized.length,
+    ...responses.map((response) => Number(response.total_results || 0) || 0)
+  );
 
   const result = {
     all: normalized,
@@ -571,11 +665,83 @@ export async function searchCatalog(query, options = {}) {
     tv: normalized.filter((item) => item.mediaType === "tv"),
     page,
     totalPages,
-    correctedQuery: "",
+    totalResults,
+    correctedQuery,
     query: text
   };
   searchCache.set(cacheKey, { timestamp: Date.now(), result });
   return result;
+}
+
+async function buildSearchQueryVariants(query) {
+  const original = String(query || "").trim();
+  if (!original) return [];
+  const words = original.split(/\s+/).filter(Boolean);
+  const correctedWords = await Promise.all(words.map(correctSearchWord));
+  const soundalikeWords = await Promise.all(words.map((word) => datamuseWordSuggestion(word, "sl")));
+  const cleaned = original
+    .replace(/[^a-z0-9\s]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const variants = [
+    original,
+    correctedWords.join(" ").trim(),
+    soundalikeWords.join(" ").trim(),
+    cleaned,
+    ...buildSearchAlternates(original).slice(0, 4)
+  ];
+  return dedupeSearchQueries(variants).slice(0, 6);
+}
+
+async function correctSearchQuery(query) {
+  const words = String(query || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return String(query || "").trim();
+
+  const correctedWords = await Promise.all(words.map(correctSearchWord));
+  return correctedWords.join(" ").trim() || String(query || "").trim();
+}
+
+async function correctSearchWord(word) {
+  return datamuseWordSuggestion(word, "sp");
+}
+
+async function datamuseWordSuggestion(word, mode = "sp") {
+  const original = String(word || "").trim();
+  if (!original || original.length < 3 || /\d/.test(original)) return original;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DATAMUSE_TIMEOUT_MS);
+  try {
+    const url = new URL("https://api.datamuse.com/words");
+    url.searchParams.set(mode === "sl" ? "sl" : "sp", original);
+    url.searchParams.set("max", "3");
+    const response = await fetch(url.toString(), {
+      signal: controller.signal,
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error("Datamuse request failed");
+    const data = await response.json();
+    const candidate = String(data?.find((entry) => entry?.word)?.word || "").trim();
+    return candidate || original;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function dedupeSearchQueries(queries) {
+  const seen = new Set();
+  return queries
+    .map((entry) => String(entry || "").trim())
+    .filter((entry) => {
+      const normalized = normalizeSearchText(entry);
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+}
+
+function scoreSearchCandidate(item, queries) {
+  return Math.max(...queries.map((query) => scoreSearchResult(item, query)));
 }
 
 async function searchTmdbPages(text, page, requestedPages) {
@@ -872,6 +1038,11 @@ function normalizeItem(item) {
     : Array.isArray(item.genre_ids)
       ? item.genre_ids.map((id) => Number(id)).filter((id) => id > 0)
       : [];
+  const keywordIds = Array.isArray(item.keyword_ids)
+    ? item.keyword_ids.map((id) => Number(id)).filter((id) => id > 0)
+    : Array.isArray(item.keywords?.results)
+      ? item.keywords.results.map((entry) => Number(entry.id)).filter((id) => id > 0)
+      : [];
 
   const runtimeMinutes = mediaType === "movie"
     ? Number(item.runtime || 0)
@@ -892,6 +1063,7 @@ function normalizeItem(item) {
     backdrop: backdropPath ? `https://image.tmdb.org/t/p/original${backdropPath}` : "",
     genre,
     genreIds,
+    keywordIds,
     runtime: runtimeMinutes > 0 ? `${runtimeMinutes} min` : "",
     plot: String(item.overview || "").trim(),
     adult: Boolean(item.adult),
@@ -916,7 +1088,12 @@ function normalizeItem(item) {
 }
 
 function isSensitiveItem(item) {
+  const mediaType = item?.mediaType === "tv" || item?.media_type === "tv" ? "tv" : "movie";
+  const id = Number(item?.id || 0);
+  if (id && blockedTitleKeys.has(`${mediaType}:${id}`)) return true;
   if (item?.adult) return true;
+  if (Array.isArray(item?.keywordIds) && item.keywordIds.some((id) => blockedKeywordIds.has(Number(id)))) return true;
+  if (Array.isArray(item?.keyword_ids) && item.keyword_ids.some((id) => blockedKeywordIds.has(Number(id)))) return true;
 
   const normalizedTitle = normalizeSearchText(item?.title);
   if (sensitiveExactTitles.has(normalizedTitle)) return true;

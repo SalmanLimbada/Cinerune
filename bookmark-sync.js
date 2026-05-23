@@ -1,28 +1,49 @@
 import { apiRequest, authHeaders } from "./auth-client.js";
 
+const bookmarkSyncBaseKey = "cinerune:bookmarks-sync";
+
+function getBookmarkSyncKey(session) {
+  const userId = session?.user?.id ? String(session.user.id) : "";
+  return userId ? `${bookmarkSyncBaseKey}:user:${userId}` : "";
+}
+
 export async function syncBookmarksWithCloud(session, localBookmarks = {}) {
   if (!session?.user) return localBookmarks || {};
 
   try {
+    const syncStartedAt = Date.now();
+    await pushBookmarksToCloud(session, getPendingLocalBookmarks(session, localBookmarks), { includeDeleted: false });
     const remote = await pullBookmarksFromCloud(session);
-    const merged = mergeBookmarks(localBookmarks, remote);
-    await pushBookmarksToCloud(session, merged);
+    const merged = mergeBookmarks(session, localBookmarks, remote, syncStartedAt);
+    localStorage.setItem(getBookmarkSyncKey(session), String(syncStartedAt));
     return merged;
   } catch {
     return localBookmarks || {};
   }
 }
 
-export async function pushBookmarksToCloud(session, bookmarks = {}) {
+function getPendingLocalBookmarks(session, bookmarks = {}) {
+  const lastSyncAt = Number(localStorage.getItem(getBookmarkSyncKey(session)) || 0);
+  const cutoff = lastSyncAt || Date.now() - 5 * 60 * 1000;
+  return Object.fromEntries(Object.entries(bookmarks || {}).filter(([, entry]) => Number(entry?.updatedAt || 0) > cutoff));
+}
+
+export async function pushBookmarksToCloud(session, bookmarks = {}, options = {}) {
   if (!session?.user) return;
+  const includeDeleted = options.includeDeleted === true;
   const rows = Object.values(bookmarks || {})
-    .filter((entry) => entry?.id && entry?.mediaType && entry?.status)
+    .filter((entry) => (
+      entry?.id
+      && entry?.mediaType
+      && entry?.status
+      && (includeDeleted || entry.status !== "deleted")
+    ))
     .slice(-240)
     .map((entry) => ({
       user_id: session.user.id,
       media_type: entry.mediaType === "tv" ? "tv" : "movie",
       content_id: Number(entry.id),
-      status: normalizeStatus(entry.status),
+      status: entry.status === "deleted" ? "deleted" : normalizeStatus(entry.status),
       title: String(entry.title || "").slice(0, 240),
       poster: String(entry.poster || "").slice(0, 500),
       updated_at: new Date(Number(entry.updatedAt || Date.now())).toISOString()
@@ -61,7 +82,7 @@ async function pullBookmarksFromCloud(session) {
     bookmarks[`${mediaType}:${id}`] = {
       id,
       mediaType,
-      status: normalizeStatus(row.status),
+      status: row.status === "deleted" ? "deleted" : normalizeStatus(row.status),
       title: row.title || "",
       poster: row.poster || "",
       updatedAt: Date.parse(row.updated_at || "") || Date.now()
@@ -70,12 +91,22 @@ async function pullBookmarksFromCloud(session) {
   return bookmarks;
 }
 
-function mergeBookmarks(localBookmarks, remoteBookmarks) {
-  const merged = { ...(remoteBookmarks || {}) };
+function mergeBookmarks(session, localBookmarks, remoteBookmarks, pulledAt = Date.now()) {
+  const lastSyncAt = Number(localStorage.getItem(getBookmarkSyncKey(session)) || 0);
+  const merged = {};
+
+  Object.entries(remoteBookmarks || {}).forEach(([key, entry]) => {
+    if (!entry || entry.status === "deleted") return;
+    merged[key] = entry;
+  });
+
   Object.entries(localBookmarks || {}).forEach(([key, entry]) => {
     if (!entry) return;
+    if (entry.status === "deleted") return;
     const existing = merged[key];
-    if (!existing || Number(entry.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
+    const localUpdatedAt = Number(entry.updatedAt || 0);
+    const isNewLocalEdit = localUpdatedAt > pulledAt || (lastSyncAt && localUpdatedAt > lastSyncAt);
+    if (isNewLocalEdit && (!existing || localUpdatedAt >= Number(existing.updatedAt || 0))) {
       merged[key] = entry;
     }
   });

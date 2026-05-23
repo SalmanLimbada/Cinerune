@@ -1,11 +1,13 @@
-import { apiRequest, authHeaders, ensureSession, getStoredSession, setStoredSession, clearStoredSession } from "./auth-client.js";
-import { ensureSharedReportMenuItem, initSharedFooterReport, initSharedNavSearch, openSettingsModal, renderSharedAccount } from "./shared-ui.js?v=20260513-fixes1";
+import { apiRequest, authHeaders, ensureSession, getStoredSession, refreshStoredSessionUser, setStoredSession, clearStoredSession } from "./auth-client.js";
+import { ensureSharedReportMenuItem, initSharedFooterReport, initSharedNavSearch, openSettingsModal, renderSharedAccount, saveSharedRecentSearch } from "./shared-ui.js?v=20260515-bugfix2";
 import { showToast } from "./ui-toast.js";
 import { syncBookmarksWithCloud } from "./bookmark-sync.js";
-import * as catalogApi from "./catalog.js?v=20260513-fixes1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
-import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
-import { buildResumableWatchHref, buildWatchHref, escapeHtml, formatSeconds, normalizePlaybackTimestamp, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260513-fixes1";
+import { deleteProgressEntryFromCloud, forgetDeletedProgressEntry, readDeletedProgressMap, rememberDeletedProgressEntries } from "./progress-sync.js";
+import { initHeaderNotifications } from "./notifications.js?v=20260515-bugfix2";
+import * as catalogApi from "./catalog.js?v=20260515-bugfix2";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260515-bugfix2";
+import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260515-bugfix2";
+import { buildResumableWatchHref, buildWatchHref, dedupeContinueProgressEntries, escapeHtml, formatSeconds, normalizePlaybackTimestamp, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260515-bugfix2";
 
 const fetchHomeCatalog = catalogApi.fetchHomeCatalog;
 const fetchGenreOptions = catalogApi.fetchGenreOptions || (async () => ({ movie: [], tv: [] }));
@@ -19,7 +21,6 @@ const fetchItemDetailsById = catalogApi.fetchItemDetailsById;
 const isSensitiveCatalogItem = catalogApi.isSensitiveCatalogItem || (() => false);
 
 const homeCacheKey = "cinerune:home-cache";
-const NEW_EPISODE_WINDOW_DAYS = 45;
 const INPUT_LIMITS = {
   identifierMax: 80,
   usernameMax: 24,
@@ -29,11 +30,12 @@ const INPUT_LIMITS = {
 };
 const avatarOptions = [
   { id: "none", label: "No Avatar" },
-  { id: "luffy", label: "Monkey D. Luffy", src: "https://avatarfiles.alphacoders.com/141/141955.png" },
-  { id: "naruto", label: "Naruto Uzumaki", src: "https://avatarfiles.alphacoders.com/106/106708.jpg" },
-  { id: "goku", label: "Goku", src: "https://avatarfiles.alphacoders.com/263/263487.png" },
-  { id: "spider", label: "Spider-Man", src: "https://avatarfiles.alphacoders.com/254/254569.jpg" },
-  { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" }
+  { id: "ironman", label: "Iron Man", src: "./avatars/ironman.png" },
+  { id: "goku", label: "Goku", src: "./avatars/goku.jpg" },
+  { id: "darthvader", label: "Darth Vader", src: "./avatars/darthvader.jpg" },
+  { id: "tonysoprano", label: "Tony Soprano", src: "./avatars/tonysoprano.jpg" },
+  { id: "luffy", label: "Monkey D. Luffy", src: "./avatars/luffy.jpg" },
+  { id: "walterwhite", label: "Walter White", src: "./avatars/walterwhite.jpg" }
 ];
 
 const el = {
@@ -155,11 +157,17 @@ const state = {
   searchTotalPages: 1,
   notifications: [],
   readNotificationIds: new Set(),
+  notificationsReady: false,
   autoSyncTimer: null,
   lastSyncAt: 0,
   progressPullTimer: null,
+  deletedProgressKeys: new Set(),
+  deletedProgressMap: {},
   lastProgressPullAt: 0,
+  progressPullEventsBound: false,
   heroRotationTimer: null,
+  heroPool: [],
+  heroIndex: 0,
   passwordRecoveryMode: false
 };
 
@@ -189,8 +197,10 @@ async function boot() {
   if (startupAuthCallback) {
     await hydrateSessionFromHash();
   }
-  await refreshHome();
-  await hydrateContinueRow();
+  await Promise.allSettled([
+    refreshHome(),
+    hydrateContinueRow()
+  ]);
 
   if (startupAuthMode === "settings" && state.session?.user) {
     openSettingsModal();
@@ -218,14 +228,6 @@ async function boot() {
 }
 
 function bindEvents() {
-  if (el.notificationsBtn) {
-    el.notificationsBtn.addEventListener("click", () => {
-      toggleNotificationsMenu();
-    });
-  }
-  if (el.notificationsMarkAll) {
-    el.notificationsMarkAll.addEventListener("click", markAllNotificationsRead);
-  }
   document.querySelectorAll("[data-settings-toggle]").forEach((button) => {
     button.addEventListener("click", () => toggleSettingsPanel(button.dataset.settingsToggle));
   });
@@ -341,7 +343,10 @@ function bindEvents() {
       if (event.key === "Enter") {
         event.preventDefault();
         const term = sanitizeText(el.navSearchInput.value, INPUT_LIMITS.searchMax);
-        if (term) openSearchPage(term);
+        if (term) {
+          saveSharedRecentSearch(term);
+          openSearchPage(term);
+        }
       }
     });
   }
@@ -349,9 +354,6 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     if (el.accountMenuWrap && !el.accountMenuWrap.contains(event.target)) {
       closeAccountMenu();
-    }
-    if (el.notificationsWrap && !el.notificationsWrap.contains(event.target)) {
-      closeNotificationsMenu();
     }
   });
 
@@ -397,18 +399,21 @@ function bindEvents() {
     const latestAvatar = latestSession?.user?.user_metadata?.avatarId;
     if (latestAvatar && latestAvatar !== state.session?.user?.user_metadata?.avatarId) {
       void handleSessionStorageChange({ quiet: true });
+      return;
+    }
+    syncProgressState();
+    syncBookmarksState();
+    if (state.session?.user) {
+      void pullCloudProgress();
+      void pullCloudBookmarks();
+    } else {
+      void hydrateContinueRow();
     }
   });
 }
 
 async function handleSessionStorageChange(options = {}) {
   const session = await ensureSession();
-  state.progress = {};
-  state.bookmarks = {};
-  state.notifications = [];
-  el.continueSection?.setAttribute("hidden", "");
-  if (el.continueGrid) el.continueGrid.innerHTML = "";
-  renderNotifications();
   state.session = session;
   syncProgressState();
   syncBookmarksState();
@@ -416,7 +421,7 @@ async function handleSessionStorageChange(options = {}) {
     state.bookmarks = await syncBookmarksWithCloud(state.session, state.bookmarks);
     localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
   }
-  syncNotificationReadState();
+  await pullNotificationReadState();
   renderAuthUI();
   if (session?.user) {
     if (!options.quiet) setAuthHint("Signed in.");
@@ -445,13 +450,13 @@ async function refreshHome() {
   const cachedHomeData = readJson(homeCacheKey, null);
   if (cachedHomeData) {
     await applyHomeData(cachedHomeData, { personalize: false });
+  } else {
+    renderHomeSkeletons();
   }
 
-  const [homeResult, genresResult, countriesResult] = await Promise.allSettled([
-    fetchHomeCatalog(),
-    fetchGenreOptions(),
-    fetchCountryOptions()
-  ]);
+  void refreshExplorerOptions();
+
+  const homeResult = await Promise.allSettled([fetchHomeCatalog()]).then((results) => results[0]);
 
   let homeData = null;
   if (homeResult.status === "fulfilled") {
@@ -470,29 +475,54 @@ async function refreshHome() {
     await applyHomeData(homeData);
   }
 
-  const genreData = genresResult.status === "fulfilled" ? genresResult.value : { movie: [], tv: [] };
-  state.genreOptions = dedupeExplorerOptions([...(genreData.movie || []), ...(genreData.tv || [])], "id");
-  state.countryOptions = countriesResult.status === "fulfilled" ? (countriesResult.value || []) : [];
-
-  renderMegaMenu();
-  await refreshNotifications();
+  void initHeaderNotifications();
   startHeroRotation();
 }
 
+async function refreshExplorerOptions() {
+  const [genresResult, countriesResult] = await Promise.allSettled([
+    fetchGenreOptions(),
+    fetchCountryOptions()
+  ]);
+  const genreData = genresResult.status === "fulfilled" ? genresResult.value : { movie: [], tv: [] };
+  state.genreOptions = dedupeExplorerOptions([...(genreData.movie || []), ...(genreData.tv || [])], "id");
+  state.countryOptions = countriesResult.status === "fulfilled" ? (countriesResult.value || []) : [];
+  renderMegaMenu();
+}
+
+function renderHomeSkeletons() {
+  [
+    el.recommendedGrid,
+    el.trendingGrid,
+    el.popularGrid,
+    el.airingTodayGrid
+  ].forEach((grid) => renderSkeletonCards(grid, 12));
+}
+
 async function applyHomeData(homeData, options = {}) {
-  state.homeData.hero = homeData.hero || null;
+  const recommendedItems = filterAllowedCatalogItems(homeData.recommended || []);
+  const trendingItems = filterAllowedCatalogItems(homeData.trending || []);
+  const popularItems = filterAllowedCatalogItems(homeData.popular || []);
+  const airingTodayItems = filterAllowedCatalogItems(homeData.airingToday || []);
+  state.homeData.hero = isSensitiveCatalogItem(homeData.hero)
+    ? (trendingItems.find((item) => item.backdrop && item.poster) || popularItems.find((item) => item.backdrop && item.poster) || recommendedItems[0] || null)
+    : (homeData.hero || null);
   state.homeData.recommended = options.personalize === false
-    ? (homeData.recommended || []).slice(0, 24)
-    : await buildRecommendedRow(homeData);
-  state.homeData.trending = homeData.trending || [];
-  state.homeData.popular = homeData.popular || [];
-  state.homeData.airingToday = homeData.airingToday || [];
+    ? recommendedItems.slice(0, 24)
+    : await buildRecommendedRow({ ...homeData, recommended: recommendedItems });
+  state.homeData.trending = trendingItems;
+  state.homeData.popular = popularItems;
+  state.homeData.airingToday = airingTodayItems;
 
   renderHero();
   renderRecommended();
   renderTrending();
   renderPopular();
   renderAiringToday();
+}
+
+function filterAllowedCatalogItems(items) {
+  return (items || []).filter((item) => !isSensitiveCatalogItem(item));
 }
 
 function renderUnavailableState() {
@@ -514,6 +544,7 @@ function renderUnavailableState() {
 function renderHero() {
   const item = state.homeData.hero;
   if (!item) return;
+  ensureHeroControls();
 
   el.heroType.textContent = item.mediaType === "movie" ? "Featured Movie" : "Featured Series";
   el.heroTitle.textContent = item.title;
@@ -542,14 +573,54 @@ function startHeroRotation() {
     ...(state.homeData.trending || []).slice(0, 8)
   ].filter(Boolean));
 
+  state.heroPool = pool;
+  state.heroIndex = Math.max(0, pool.findIndex((item) => (
+    item.id === state.homeData.hero?.id && item.mediaType === state.homeData.hero?.mediaType
+  )));
+
   if (pool.length < 2) return;
 
   state.heroRotationTimer = window.setInterval(() => {
-    const next = pool[Math.floor(Math.random() * pool.length)];
-    if (!next) return;
-    state.homeData.hero = next;
-    renderHero();
+    showHeroAt(state.heroIndex + 1);
   }, 12000);
+}
+
+function restartHeroRotationTimer() {
+  if (state.heroRotationTimer) {
+    clearInterval(state.heroRotationTimer);
+    state.heroRotationTimer = null;
+  }
+  if (state.heroPool.length < 2) return;
+  state.heroRotationTimer = window.setInterval(() => {
+    showHeroAt(state.heroIndex + 1);
+  }, 12000);
+}
+
+function ensureHeroControls() {
+  if (!el.heroSection || el.heroSection.querySelector(".hero-controls")) return;
+  const controls = document.createElement("div");
+  controls.className = "hero-controls";
+  controls.innerHTML = `
+    <button class="hero-control-btn" type="button" data-hero-step="-1" aria-label="Previous featured title">‹</button>
+    <button class="hero-control-btn" type="button" data-hero-step="1" aria-label="Next featured title">›</button>
+  `;
+  controls.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-hero-step]");
+    if (!button) return;
+    showHeroAt(state.heroIndex + Number(button.dataset.heroStep || 1));
+    restartHeroRotationTimer();
+  });
+  el.heroSection.appendChild(controls);
+}
+
+function showHeroAt(index) {
+  if (!state.heroPool.length) return;
+  const nextIndex = (Number(index || 0) + state.heroPool.length) % state.heroPool.length;
+  const next = state.heroPool[nextIndex];
+  if (!next) return;
+  state.heroIndex = nextIndex;
+  state.homeData.hero = next;
+  renderHero();
 }
 
 function renderRecommended() {
@@ -603,8 +674,7 @@ function renderMegaMenu() {
 }
 
 async function hydrateContinueRow() {
-  const entries = dedupeContinueEntries(Object.values(state.progress)
-    .filter((entry) => normalizePlaybackTimestamp(entry.timestamp, entry.duration) > 8 && Number(entry.progress || 0) < 98))
+  const entries = dedupeContinueProgressEntries(Object.values(state.progress || {}))
     .slice(0, 14);
 
   updateContinueWatchingLink(entries[0] || null);
@@ -722,23 +792,31 @@ function renderPosterCards(container, items, options = {}) {
   initDragScroll();
 }
 
-function dedupeContinueEntries(entries) {
-  const map = new Map();
-  entries.forEach((entry) => {
-    const key = `${entry.mediaType === "tv" ? "tv" : "movie"}:${Number(entry.id || 0)}`;
-    const previous = map.get(key);
-    if (!previous || Number(entry.updatedAt || 0) > Number(previous.updatedAt || 0)) {
-      map.set(key, entry);
-    }
-  });
-  return [...map.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+function renderSkeletonCards(container, count = 12) {
+  if (!container) return;
+  container.innerHTML = Array.from({ length: count }, () => `
+    <article class="poster-card skeleton-card" aria-hidden="true">
+      <span class="skeleton skeleton-poster"></span>
+      <span class="skeleton skeleton-line"></span>
+      <span class="skeleton skeleton-line short"></span>
+    </article>
+  `).join("");
 }
 
 function removeContinueEntry(progressEntryKey) {
   if (!progressEntryKey || !state.progress?.[progressEntryKey]) return;
+  const entry = state.progress[progressEntryKey];
+  rememberDeletedProgressEntries(state.session, [entry]);
+  state.deletedProgressMap = readDeletedProgressMap(state.session);
+  state.deletedProgressKeys = new Set(Object.keys(state.deletedProgressMap));
   delete state.progress[progressEntryKey];
   localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
-  void hydrateContinueRow();
+  showToast("Removed from Continue Watching");
+  hydrateContinueRow();
+  void deleteProgressEntryFromCloud(state.session, entry).then(() => {
+    state.deletedProgressMap = readDeletedProgressMap(state.session);
+    state.deletedProgressKeys = new Set(Object.keys(state.deletedProgressMap));
+  });
   void refreshPersonalizedCollections();
 }
 
@@ -798,177 +876,7 @@ function collectRecommendationExcludedKeys() {
 async function refreshPersonalizedCollections() {
   state.homeData.recommended = await buildRecommendedRow(state.homeData);
   renderRecommended();
-  await refreshNotifications();
-}
-
-async function refreshNotifications() {
-  if (!state.session?.user) {
-    state.notifications = [];
-    renderNotifications();
-    return;
-  }
-
-  const watchedShows = Object.values(state.bookmarks || {})
-    .filter((entry) => entry?.mediaType === "tv" && (entry?.status === "watched" || entry?.status === "watching"))
-    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-
-  const notifications = (await Promise.all(watchedShows.map(buildEpisodeNotification))).filter(Boolean);
-  state.notifications = notifications.sort((a, b) => Number(b.sortAt || 0) - Number(a.sortAt || 0));
-  renderNotifications();
-}
-
-async function buildEpisodeNotification(entry) {
-  const id = Number(entry?.id || 0);
-  if (!id) return null;
-
-  let item = null;
-  try {
-    item = await fetchItemDetailsById(id, "tv", { forceEpisodeRefresh: true });
-  } catch {
-    return null;
-  }
-
-  const latestSeason = Number(item?.latestEpisodeSeason || 0);
-  const latestEpisode = Number(item?.latestEpisodeNumber || 0);
-  const latestAirDate = String(item?.latestEpisodeAirDate || "").trim();
-  if (!latestSeason || !latestEpisode || !latestAirDate || !isRecentReleasedDate(latestAirDate)) {
-    return null;
-  }
-
-  const watched = getLatestWatchedEpisode(id);
-  if (!isEpisodeAfter(latestSeason, latestEpisode, watched.season, watched.episode)) {
-    return null;
-  }
-
-  const notification = {
-    id,
-    mediaType: "tv",
-    title: item?.title || entry.title || `Title ${id}`,
-    poster: item?.poster || entry.poster || "",
-    season: latestSeason,
-    episode: latestEpisode,
-    airDate: latestAirDate,
-    episodeName: item?.latestEpisodeName || "",
-    sortAt: Date.parse(latestAirDate) || Date.now(),
-    message: `${item?.title || entry.title || "This show"} has a new episode available.`,
-    href: buildWatchHref(id, "tv", latestSeason, latestEpisode, true)
-  };
-  notification.readId = buildNotificationReadId(notification);
-  return notification;
-}
-
-function getLatestWatchedEpisode(showId) {
-  const entries = Object.values(state.progress || {})
-    .filter((entry) => entry?.mediaType === "tv" && Number(entry.id) === Number(showId))
-    .sort((a, b) => {
-      const seasonDiff = Number(b.season || 1) - Number(a.season || 1);
-      if (seasonDiff !== 0) return seasonDiff;
-      const episodeDiff = Number(b.episode || 1) - Number(a.episode || 1);
-      if (episodeDiff !== 0) return episodeDiff;
-      return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
-    });
-
-  if (!entries.length) {
-    return { season: 1, episode: 0 };
-  }
-
-  return {
-    season: Number(entries[0].season || 1),
-    episode: Number(entries[0].episode || 0)
-  };
-}
-
-function renderNotifications() {
-  const signedIn = Boolean(state.session?.user);
-  if (el.notificationsWrap) {
-    el.notificationsWrap.toggleAttribute("hidden", !signedIn);
-  }
-
-  if (!signedIn || !el.notificationsList || !el.notificationsBadge || !el.notificationsBtn) {
-    return;
-  }
-
-  const notifications = state.notifications || [];
-  const unreadNotifications = notifications.filter((item) => !isNotificationRead(item));
-  const unreadCount = unreadNotifications.length;
-  el.notificationsBadge.textContent = String(unreadCount);
-  el.notificationsBadge.toggleAttribute("hidden", unreadCount < 1);
-  el.notificationsMarkAll?.toggleAttribute("hidden", unreadCount < 1);
-
-  if (!unreadNotifications.length) {
-    el.notificationsList.innerHTML = '<p class="notification-empty tiny muted">No new episodes right now.</p>';
-    return;
-  }
-
-  el.notificationsList.innerHTML = unreadNotifications.map((item) => `
-    <div class="notification-item${isNotificationRead(item) ? " read" : ""}" data-read-id="${escapeHtml(item.readId)}">
-      <a class="notification-link" href="${escapeHtml(item.href)}" data-id="${item.id}" data-season="${item.season}" data-episode="${item.episode}">
-        <span class="notification-copy">
-          <strong>${escapeHtml(item.title)}</strong>
-          <span>${escapeHtml(`New episode: S${item.season} E${item.episode}${item.episodeName ? ` - ${item.episodeName}` : ""}`)}</span>
-        </span>
-        <span class="notification-date">
-          <span>${escapeHtml(formatTimeAgo(item.airDate))}</span>
-          <span>${escapeHtml(formatShortDate(item.airDate))}</span>
-        </span>
-      </a>
-      <button class="mini-action-btn notification-read-btn" type="button" data-read-id="${escapeHtml(item.readId)}">Read</button>
-    </div>
-  `).join("");
-
-  [...el.notificationsList.querySelectorAll(".notification-link")].forEach((node) => {
-    node.addEventListener("click", (event) => {
-      event.preventDefault();
-      markNotificationRead(node.closest(".notification-item")?.dataset.readId);
-      closeNotificationsMenu();
-      openWatchPage(Number(node.dataset.id), "tv", Number(node.dataset.season), Number(node.dataset.episode));
-    });
-  });
-  [...el.notificationsList.querySelectorAll(".notification-read-btn")].forEach((node) => {
-    node.addEventListener("click", () => markNotificationRead(node.dataset.readId));
-  });
-}
-
-function buildNotificationReadId(item) {
-  return `tv:${Number(item.id)}:${Number(item.season)}:${Number(item.episode)}:${String(item.airDate || "")}`;
-}
-
-function isNotificationRead(item) {
-  return state.readNotificationIds?.has(item?.readId || buildNotificationReadId(item));
-}
-
-function markNotificationRead(readId) {
-  if (!readId) return;
-  state.readNotificationIds.add(readId);
-  saveNotificationReadState();
-  renderNotifications();
-}
-
-function markAllNotificationsRead() {
-  (state.notifications || []).forEach((item) => {
-    state.readNotificationIds.add(item.readId || buildNotificationReadId(item));
-  });
-  saveNotificationReadState();
-  renderNotifications();
-}
-
-function saveNotificationReadState() {
-  const values = [...state.readNotificationIds].slice(-200);
-  state.readNotificationIds = new Set(values);
-  localStorage.setItem(getNotificationReadKey(state.session), JSON.stringify(values));
-}
-
-function toggleNotificationsMenu() {
-  if (!el.notificationsMenu || !state.session?.user) return;
-  const hidden = el.notificationsMenu.hasAttribute("hidden");
-  closeAccountMenu();
-  if (hidden) {
-    el.notificationsMenu.removeAttribute("hidden");
-    el.notificationsBtn?.setAttribute("aria-expanded", "true");
-    updateMenuScrimVisibility();
-  } else {
-    closeNotificationsMenu();
-  }
+  void initHeaderNotifications();
 }
 
 function closeNotificationsMenu() {
@@ -1050,6 +958,22 @@ function syncNotificationReadState() {
   state.readNotificationIds = new Set(Array.isArray(values) ? values : []);
 }
 
+async function pullNotificationReadState() {
+  syncNotificationReadState();
+  if (!state.session?.user) return;
+  try {
+    const remoteState = await apiRequest("/notifications/read", {
+      method: "GET",
+      headers: authHeaders(state.session)
+    });
+    const remote = remoteState?.notificationReadIds;
+    if (!Array.isArray(remote)) return;
+    state.readNotificationIds = new Set(remote.slice(-500));
+  } catch {
+    // Local notification read state is still valid if the cloud read fails.
+  }
+}
+
 function syncProgressState() {
   const activeKey = getProgressKey(state.session);
   let progress = readJson(activeKey, null);
@@ -1063,6 +987,8 @@ function syncProgressState() {
   }
 
   state.progress = progress && typeof progress === "object" ? progress : {};
+  state.deletedProgressMap = readDeletedProgressMap(state.session);
+  state.deletedProgressKeys = new Set(Object.keys(state.deletedProgressMap));
 }
 
 function startProgressPulling() {
@@ -1072,7 +998,23 @@ function startProgressPulling() {
     if (!state.session?.user) return;
     if (document.visibilityState !== "visible") return;
     void pullCloudProgress();
-  }, 60000);
+    void pullCloudBookmarks();
+  }, 300000);
+  if (!state.progressPullEventsBound) {
+    state.progressPullEventsBound = true;
+    window.addEventListener("focus", () => {
+      if (state.session?.user) {
+        void pullCloudProgress();
+        void pullCloudBookmarks();
+      }
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && state.session?.user) {
+        void pullCloudProgress();
+        void pullCloudBookmarks();
+      }
+    });
+  }
 }
 
 function stopProgressPulling() {
@@ -1083,20 +1025,26 @@ function stopProgressPulling() {
 }
 
 async function initAuth() {
+  const storedSession = getStoredSession();
+  if (storedSession?.user) {
+    state.session = storedSession;
+    syncProgressState();
+    syncBookmarksState();
+    renderAuthUI();
+  }
   try {
-    const session = await ensureSession();
+    const session = await refreshStoredSessionUser();
     state.session = session;
     syncProgressState();
     syncBookmarksState();
     if (state.session?.user) {
-      state.bookmarks = await syncBookmarksWithCloud(state.session, state.bookmarks);
-      localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+      void pullCloudBookmarks();
     }
-    syncNotificationReadState();
+    void pullNotificationReadState();
     renderAuthUI();
-    renderNotifications();
+    void initHeaderNotifications();
     if (state.session?.user) {
-      await pullCloudProgress();
+      void pullCloudProgress();
       startProgressPulling();
     } else {
       stopProgressPulling();
@@ -1207,7 +1155,7 @@ function renderAuthUI() {
     el.authPassword.value = "";
   }
 
-  renderNotifications();
+  void initHeaderNotifications();
 }
 
 function updatePasswordSettingsLabels() {
@@ -1282,7 +1230,7 @@ async function signIn() {
     state.session = session;
     syncProgressState();
     syncBookmarksState();
-    syncNotificationReadState();
+    await pullNotificationReadState();
     selectedAvatarId = normalizeAvatarId(session.user?.user_metadata?.avatarId || "none");
     closeAuthModal();
     renderAuthUI();
@@ -1423,7 +1371,7 @@ async function signUp() {
     selectedAvatarId = normalizeAvatarId(session.user?.user_metadata?.avatarId || "none");
     syncProgressState();
     syncBookmarksState();
-    syncNotificationReadState();
+    await pullNotificationReadState();
     closeAuthModal();
     renderAuthUI();
     await pullCloudProgress();
@@ -1465,6 +1413,9 @@ function renderContinueMeta(container, item) {
   main.className = "continue-meta-main";
   const extra = document.createElement("span");
   extra.className = "continue-meta-extra";
+  const detail = document.createElement("span");
+  detail.className = "continue-meta-detail";
+  detail.textContent = [item.mediaType === "movie" ? "Movie" : "TV", item.year].filter(Boolean).join(" | ");
 
   if (item.mediaType === "tv") {
     main.textContent = `S${item.season || 1} E${item.episode || 1}`;
@@ -1474,6 +1425,7 @@ function renderContinueMeta(container, item) {
     extra.textContent = formatSeconds(item.resumeSeconds || 0);
   }
   container.append(main, extra);
+  if (detail.textContent) container.append(detail);
 }
 
 async function saveUsername() {
@@ -1780,8 +1732,14 @@ function isValidPassword(value) {
 }
 
 function normalizeAvatarId(value) {
+  const legacyMap = {
+    naruto: "ironman",
+    spider: "darthvader",
+    eren: "tonysoprano"
+  };
+  const mapped = legacyMap[value] || value;
   const fallback = avatarOptions[0]?.id || "none";
-  return avatarOptions.some((option) => option.id === value) ? value : fallback;
+  return avatarOptions.some((option) => option.id === mapped) ? mapped : fallback;
 }
 
 function renderAvatarPickers() {
@@ -1913,10 +1871,7 @@ function getMenuScrim() {
 
 function updateMenuScrimVisibility() {
   const scrim = getMenuScrim();
-  const menusOpen = [el.accountMenu, el.notificationsMenu]
-    .some((menu) => menu && !menu.hasAttribute("hidden"));
-  const shouldShowScrim = menusOpen && window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
-  scrim.toggleAttribute("hidden", !shouldShowScrim);
+  scrim.setAttribute("hidden", "");
 }
 
 function openAuthModal(mode = "login") {
@@ -1953,7 +1908,11 @@ async function syncProgressToCloud() {
 
   const rows = dedupeProgressRows(Object.values(state.progress))
     .filter((entry) => shouldSyncProgressEntry(entry))
-    .slice(-240)
+    .filter((entry) => {
+      const deletedAt = Number(state.deletedProgressMap?.[`${entry.mediaType}:${entry.id}:${entry.season || 1}:${entry.episode || 1}`] || 0);
+      return !deletedAt || Number(entry.updatedAt || 0) > deletedAt;
+    })
+    .slice(0, 240)
     .map((entry) => ({
     user_id: state.session.user.id,
     media_type: entry.mediaType,
@@ -2032,20 +1991,21 @@ async function pullCloudProgress() {
     return;
   }
 
+  const pulledAt = Date.now();
+  const nextProgress = {};
   (data || []).forEach((row) => {
     const mediaType = row.media_type === "tv" ? "tv" : "movie";
     const id = Number(row.content_id);
+    if (!id) return;
     const season = Number(row.season_number) || 1;
     const episode = Number(row.episode_number) || 1;
     const key = `${mediaType}:${id}:${season}:${episode}`;
     const cloudUpdatedAt = Date.parse(row.updated_at || "") || 0;
-    const existing = state.progress[key];
-
-    if (existing && cloudUpdatedAt <= Number(existing.updatedAt || 0)) {
+    if (state.deletedProgressKeys?.has(key) && cloudUpdatedAt <= Number(state.deletedProgressMap?.[key] || 0)) {
       return;
     }
 
-    state.progress[key] = {
+    const entry = {
       mediaType,
       id,
       season,
@@ -2057,11 +2017,36 @@ async function pullCloudProgress() {
       title: titleById(id, mediaType) || `Title ${id}`,
       poster: posterById(id, mediaType) || ""
     };
+    if (normalizePlaybackTimestamp(entry.timestamp, entry.duration) > 8) {
+      nextProgress[key] = entry;
+   }
+    forgetDeletedProgressEntry(state.session, entry);
+    state.deletedProgressMap = readDeletedProgressMap(state.session);
+    state.deletedProgressKeys = new Set(Object.keys(state.deletedProgressMap));
   });
 
+  Object.entries(state.progress || {}).forEach(([key, entry]) => {
+    if (nextProgress[key]) return;
+    if (Number(entry?.updatedAt || 0) > pulledAt) {
+      nextProgress[key] = entry;
+    }
+  });
+  state.progress = nextProgress;
   localStorage.setItem(getProgressKey(state.session), JSON.stringify(state.progress));
   await hydrateContinueRow();
   await refreshPersonalizedCollections();
+}
+
+async function pullCloudBookmarks() {
+  if (!state.session?.user) return;
+  try {
+    const synced = await syncBookmarksWithCloud(state.session, state.bookmarks);
+    state.bookmarks = synced || {};
+    localStorage.setItem(getBookmarksKey(state.session), JSON.stringify(state.bookmarks));
+    await refreshPersonalizedCollections();
+  } catch {
+    // Keep current bookmarks if cloud sync is unavailable.
+  }
 }
 
 function renderSearchResults(items) {
@@ -2241,44 +2226,6 @@ function nudgeAuthCard() {
   }, 520);
 }
 
-function isReleasedDate(value) {
-  if (!value) return false;
-  const timestamp = Date.parse(`${value}T23:59:59Z`);
-  return Number.isFinite(timestamp) && timestamp <= Date.now();
-}
-
-function isRecentReleasedDate(value) {
-  if (!isReleasedDate(value)) return false;
-  const timestamp = Date.parse(`${value}T23:59:59Z`);
-  return Number.isFinite(timestamp) && Date.now() - timestamp <= NEW_EPISODE_WINDOW_DAYS * 86400000;
-}
-
-function isEpisodeAfter(seasonA, episodeA, seasonB, episodeB) {
-  if (Number(seasonA) !== Number(seasonB)) return Number(seasonA) > Number(seasonB);
-  return Number(episodeA) > Number(episodeB);
-}
-
-function formatShortDate(value) {
-  const parsed = Date.parse(String(value || ""));
-  if (!Number.isFinite(parsed)) return "";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric"
-  }).format(new Date(parsed));
-}
-
-function formatTimeAgo(value) {
-  const parsed = Date.parse(`${String(value || "").trim()}T00:00:00`);
-  if (!Number.isFinite(parsed)) return "";
-  const diffMs = Math.max(0, Date.now() - parsed);
-  const hours = Math.max(1, Math.floor(diffMs / 3600000));
-  if (hours < 48) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
 
@@ -2330,7 +2277,9 @@ function countryFlagMarkup(code) {
   const normalized = String(code || "").trim().toLowerCase();
   const mapped = normalizeCountryFlagCode(normalized);
   if (!mapped) return "";
-  const src = `https://flagcdn.com/24x18/${mapped}.png`;
+  const src = mapped.includes("-")
+    ? `https://flagcdn.com/${mapped}.svg`
+    : `https://flagcdn.com/24x18/${mapped}.png`;
   return `<img class="country-flag-image" src="${escapeHtml(src)}" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
 }
 
@@ -2344,13 +2293,15 @@ function normalizeCountryFlagCode(code) {
     zr: "cd",
     dd: "de",
     fx: "fr",
-    cs: "rs",
+    cs: "cz",
+    xc: "cz",
+    xi: "gb-nir",
     su: "ru",
     an: "nl",
     bu: "mm"
   };
   const mapped = aliases[value] || value;
-  return /^[a-z]{2}$/.test(mapped) ? mapped : "";
+  return /^[a-z]{2}(?:-[a-z]{3})?$/.test(mapped) ? mapped : "";
 }
 
 function dedupeExplorerOptions(items, key) {
@@ -2391,68 +2342,8 @@ function avatarDataUri(avatar) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Default profile"><rect width="128" height="128" rx="32" fill="#102035"/><circle cx="64" cy="48" r="23" fill="#6f8aa5"/><path d="M24 112c5-25 21-39 40-39s35 14 40 39" fill="#6f8aa5"/></svg>`;
     return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
   }
-  if (!avatar?.bg1) {
-    const safeLabel = escapeHtml(avatar?.label || "Avatar");
-    const initials = escapeHtml(String(avatar?.label || "AV").split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase() || "AV");
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#179de5"/><stop offset="100%" stop-color="#071528"/></linearGradient></defs><rect width="128" height="128" rx="32" fill="url(#g)"/><text x="64" y="73" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="34" font-weight="800" text-anchor="middle">${initials}</text></svg>`;
-    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-  }
-  const safeLabel = escapeHtml(avatar.label);
-  const safeBg1 = escapeHtml(avatar.bg1);
-  const safeBg2 = escapeHtml(avatar.bg2);
-  const safeSkin = escapeHtml(avatar.skin);
-  const safeHair = escapeHtml(avatar.hair);
-  const safeShirt = escapeHtml(avatar.shirt);
-  const safeEyes = escapeHtml(avatar.eyes);
-  const safeAccent = escapeHtml(avatar.accent);
-  const backHair = avatarBackHairSvg(avatar.hairStyle, safeHair);
-  const frontHair = avatarFrontHairSvg(avatar.hairStyle, safeHair);
-  const accessory = avatarAccessorySvg(avatar.accessory, safeAccent, safeEyes);
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}">
-      <defs><linearGradient id="bg-${avatar.id}" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="${safeBg1}" /><stop offset="100%" stop-color="${safeBg2}" /></linearGradient></defs>
-      <rect width="128" height="128" rx="32" fill="url(#bg-${avatar.id})" />
-      ${backHair}
-      <path d="M 24 128 C 24 96 104 96 104 128" fill="${safeShirt}" />
-      <path d="M 44 128 C 44 104 84 104 84 128" fill="rgba(255,255,255,0.15)" />
-      <rect x="54" y="70" width="20" height="24" rx="8" fill="${safeSkin}" />
-      <rect x="54" y="78" width="20" height="12" fill="rgba(0,0,0,0.1)" />
-      <rect x="36" y="28" width="56" height="60" rx="26" fill="${safeSkin}" />
-      ${frontHair}
-      <circle cx="50" cy="58" r="4" fill="${safeEyes}" />
-      <circle cx="78" cy="58" r="4" fill="${safeEyes}" />
-      <circle cx="42" cy="66" r="5" fill="#ff0000" opacity="0.12" />
-      <circle cx="86" cy="66" r="5" fill="#ff0000" opacity="0.12" />
-      <path d="M 58 68 Q 64 74 70 68" stroke="${safeEyes}" stroke-width="3" stroke-linecap="round" fill="none" />
-      ${accessory}
-    </svg>`.replace(/\s+/g, " ").trim();
+  const safeLabel = escapeHtml(avatar?.label || "Avatar");
+  const initials = escapeHtml(String(avatar?.label || "AV").split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase() || "AV");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#179de5"/><stop offset="100%" stop-color="#071528"/></linearGradient></defs><rect width="128" height="128" rx="32" fill="url(#g)"/><text x="64" y="73" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="34" font-weight="800" text-anchor="middle">${initials}</text></svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
-function avatarBackHairSvg(style, color) {
-  if (style === "bald") return "";
-  if (style === "spiky") return `<path d="M 24 60 L 16 40 L 32 32 L 40 12 L 64 6 L 88 12 L 96 32 L 112 40 L 104 60 Z" fill="${color}" />`;
-  if (style === "long") return `<rect x="32" y="40" width="64" height="60" rx="16" fill="${color}" /><path d="M 32 80 L 32 110 C 32 120 44 120 44 110 L 44 80 Z" fill="${color}" /><path d="M 96 80 L 96 110 C 96 120 84 120 84 110 L 84 80 Z" fill="${color}" />`;
-  if (style === "bun") return `<circle cx="64" cy="18" r="14" fill="${color}" />`;
-  if (style === "bob") return `<rect x="30" y="36" width="68" height="48" rx="20" fill="${color}" />`;
-  return "";
-}
-
-function avatarFrontHairSvg(style, color) {
-  if (style === "bald") return "";
-  if (style === "spiky") return `<path d="M 32 52 L 36 26 L 48 38 L 54 18 L 64 36 L 74 18 L 80 38 L 92 26 L 96 52 Z" fill="${color}" />`;
-  if (style === "short") return `<path d="M 32 52 C 32 16 96 16 96 52 C 96 58 84 46 64 42 C 44 38 32 58 32 52 Z" fill="${color}" />`;
-  if (style === "long" || style === "bun") return `<path d="M 36 46 C 36 20 92 20 92 46 Q 78 34 64 34 Q 50 34 36 46 Z" fill="${color}" />`;
-  if (style === "bob") return `<path d="M 36 48 C 36 20 92 20 92 48 Q 78 34 64 34 Q 50 34 36 48 Z" fill="${color}" />`;
-  return "";
-}
-
-function avatarAccessorySvg(accessory, accent, eyes) {
-  if (accessory === "headband") return `<rect x="36" y="36" width="56" height="12" fill="${accent}" /><rect x="52" y="38" width="24" height="8" rx="2" fill="#ddd" />`;
-  if (accessory === "strawhat") return `<ellipse cx="64" cy="32" rx="46" ry="12" fill="${accent}" /><path d="M 42 30 C 42 8 86 8 86 30 Z" fill="${accent}" /><path d="M 43 26 C 43 28 85 28 85 26 Z" fill="#e03131" stroke="#e03131" stroke-width="3" />`;
-  if (accessory === "glasses_scar" || accessory === "glasses_goatee") return `<rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" /><rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" /><line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />`;
-  if (accessory === "blindfold") return `<rect x="36" y="48" width="56" height="18" fill="${accent}" />`;
-  if (accessory === "earring") return `<circle cx="34" cy="64" r="4" fill="${accent}" /><circle cx="94" cy="64" r="4" fill="${accent}" />`;
-  if (accessory === "star") return `<path d="M 82 32 L 84 38 L 90 38 L 85 42 L 87 48 L 82 44 L 77 48 L 79 42 L 74 38 L 80 38 Z" fill="${accent}" />`;
-  return "";
 }

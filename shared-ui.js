@@ -1,27 +1,21 @@
-import { apiRequest, authHeaders, clearStoredSession, ensureSession, setStoredSession } from "./auth-client.js";
-import { initHeaderNotifications } from "./notifications.js?v=20260513-fixes1";
-import { searchCatalog } from "./catalog.js?v=20260513-fixes1";
-import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
-import { buildResumableWatchHref, buildWatchHref, debounce, escapeHtml, readJson, sanitizeText } from "./shared-utils.js?v=20260513-fixes1";
+import { apiRequest, authHeaders, clearStoredSession, ensureSession, getStoredSession, refreshStoredSessionUser, setStoredSession } from "./auth-client.js";
+import { initHeaderNotifications } from "./notifications.js?v=20260515-bugfix2";
+import { searchCatalog } from "./catalog.js?v=20260515-bugfix2";
+import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260515-bugfix2";
+import { buildResumableWatchHref, buildWatchHref, debounce, escapeHtml, readJson, sanitizeText } from "./shared-utils.js?v=20260515-bugfix2";
 import { showToast } from "./ui-toast.js";
 
 const avatarOptions = [
   { id: "none", label: "No Avatar" },
-  { id: "luffy", label: "Monkey D. Luffy", src: "https://avatarfiles.alphacoders.com/141/141955.png" },
-  { id: "naruto", label: "Naruto Uzumaki", src: "https://avatarfiles.alphacoders.com/106/106708.jpg" },
-  { id: "goku", label: "Goku", src: "https://avatarfiles.alphacoders.com/263/263487.png" },
-  { id: "spider", label: "Spider-Man", src: "https://avatarfiles.alphacoders.com/254/254569.jpg" },
-  { id: "eren", label: "Eren Yeager", src: "https://avatarfiles.alphacoders.com/162/162005.jpg" }
+  { id: "ironman", label: "Iron Man", src: "./avatars/ironman.png" },
+  { id: "goku", label: "Goku", src: "./avatars/goku.jpg" },
+  { id: "darthvader", label: "Darth Vader", src: "./avatars/darthvader.jpg" },
+  { id: "tonysoprano", label: "Tony Soprano", src: "./avatars/tonysoprano.jpg" },
+  { id: "luffy", label: "Monkey D. Luffy", src: "./avatars/luffy.jpg" },
+  { id: "walterwhite", label: "Walter White", src: "./avatars/walterwhite.jpg" }
 ];
 const recentSearchesKey = "cinerune:recent-searches";
-const RECENT_SEARCH_LIMIT = 8;
-const settingsKey = "cinerune:settings";
-const defaultServerOrder = ["videasy", "vidrock", "vidking"];
-const serverLabels = {
-  videasy: "Videasy",
-  vidrock: "Vidrock",
-  vidking: "Vidking"
-};
+const RECENT_SEARCH_LIMIT = 12;
 
 export function initSharedHeader() {
   const accountWrap = document.getElementById("accountMenuWrap");
@@ -31,8 +25,9 @@ export function initSharedHeader() {
   const label = document.getElementById("authButtonLabel");
   const signOut = document.getElementById("signOutMenuBtn");
   const notificationsWrap = document.getElementById("notificationsWrap");
-  let currentSession = null;
+  let currentSession = getStoredSession();
   let currentProgress = readJson(getProgressKey(null), readJson(legacyProgressKey, {})) || {};
+  let lastSessionRefreshAt = 0;
 
   sharedHeaderRefs.avatar = avatar;
   sharedHeaderRefs.label = label;
@@ -45,10 +40,11 @@ export function initSharedHeader() {
 
   initSharedNavSearch({ getProgress: () => currentProgress });
   initSharedFooterReport(() => currentSession);
-  renderSharedAccount(avatar, label, null);
-  updateBookmarksLink(bookmarksLink, null);
+  renderSharedAccount(avatar, label, currentSession);
+  updateBookmarksLink(bookmarksLink, currentSession);
+  notificationsWrap?.toggleAttribute("hidden", !currentSession?.user);
 
-  ensureSession().then((session) => {
+  refreshStoredSessionUser().then((session) => {
     currentSession = session;
     currentProgress = readJson(getProgressKey(session), {}) || {};
     renderSharedAccount(avatar, label, session);
@@ -67,10 +63,19 @@ export function initSharedHeader() {
     if (currentSession?.user) void initHeaderNotifications();
   });
 
+  const refreshCloudSession = () => {
+    if (!currentSession?.user || document.visibilityState !== "visible") return;
+    if (Date.now() - lastSessionRefreshAt < 30000) return;
+    lastSessionRefreshAt = Date.now();
+    void refreshStoredSessionUser().catch(() => {});
+  };
+  window.addEventListener("focus", refreshCloudSession);
+  document.addEventListener("visibilitychange", refreshCloudSession);
+
   accountBtn?.addEventListener("click", async () => {
     if (!currentSession) {
       try {
-        currentSession = await ensureSession();
+        currentSession = await refreshStoredSessionUser();
         renderSharedAccount(avatar, label, currentSession);
       } catch {
         currentSession = null;
@@ -115,6 +120,13 @@ export function initSharedHeader() {
   initHeaderNotifications();
 }
 
+export function getSharedRecentSearches() {
+  const entries = readJson(recentSearchesKey, []);
+  return Array.isArray(entries)
+    ? entries.map((entry) => sanitizeText(entry, 80)).filter(Boolean).slice(0, RECENT_SEARCH_LIMIT)
+    : [];
+}
+
 function getMenuScrim() {
   let scrim = document.getElementById("menuScrim");
   if (!scrim) {
@@ -143,12 +155,7 @@ function getMenuScrim() {
 
 function updateMenuScrimVisibility() {
   const scrim = getMenuScrim();
-  const accountMenu = document.getElementById("accountMenu");
-  const notificationsMenu = document.getElementById("notificationsMenu");
-  const menusOpen = [accountMenu, notificationsMenu]
-    .some((menu) => menu && !menu.hasAttribute("hidden"));
-  const shouldShowScrim = menusOpen && window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
-  scrim.toggleAttribute("hidden", !shouldShowScrim);
+  scrim.setAttribute("hidden", "");
 }
 
 const sharedAuthState = {
@@ -401,7 +408,17 @@ function bindSettingsMenu(menu, getSession) {
   if (!settingsItem) return;
   settingsItem.addEventListener("click", async (event) => {
     event.preventDefault();
-    const session = await ensureSession();
+    menu.setAttribute("hidden", "");
+    const accountButton = menu.closest(".account-menu-wrap")?.querySelector("button");
+    accountButton?.classList.remove("active");
+    accountButton?.setAttribute("aria-expanded", "false");
+    updateMenuScrimVisibility();
+    let session = null;
+    try {
+      session = await ensureSession();
+    } catch {
+      session = null;
+    }
     if (!session?.user) {
       openSharedAuthModal("login");
       return;
@@ -525,17 +542,6 @@ function initSharedSettingsModal() {
             <div id="sharedAvatarPicker" class="avatar-picker" aria-label="Avatar choices"></div>
           </div>
 
-          <button class="settings-action-toggle" type="button" data-settings-toggle="servers" aria-expanded="false">
-            <span>
-              <strong>Server Order</strong>
-              <small>Choose how the watch page server buttons are arranged.</small>
-            </span>
-            <span class="settings-action-icon" aria-hidden="true">+</span>
-          </button>
-          <div class="settings-section" data-settings-panel="servers" hidden>
-            <div id="sharedServerOrderList" class="server-order-list" aria-label="Server order"></div>
-          </div>
-
           <button class="settings-action-toggle danger" type="button" data-settings-toggle="delete" aria-expanded="false">
             <span>
               <strong>Delete Account</strong>
@@ -583,7 +589,6 @@ function initSharedSettingsModal() {
   settingsModalState.saveEmail = modal.querySelector("#sharedSaveEmail");
   settingsModalState.savePassword = modal.querySelector("#sharedSavePassword");
   settingsModalState.avatarPicker = modal.querySelector("#sharedAvatarPicker");
-  settingsModalState.serverOrderList = modal.querySelector("#sharedServerOrderList");
   settingsModalState.actionToggles = [...modal.querySelectorAll("[data-settings-toggle]")];
 
   settingsModalState.backdrop?.addEventListener("click", closeSharedSettingsModal);
@@ -600,7 +605,14 @@ function initSharedSettingsModal() {
 
 async function openSharedSettingsModal(initialPanelName) {
   if (!settingsModalState.modal) return;
-  const session = settingsModalState.session || await ensureSession();
+  let session = settingsModalState.session || null;
+  if (!session?.user) {
+    try {
+      session = await ensureSession();
+    } catch {
+      session = null;
+    }
+  }
   if (!session?.user) {
     openSharedAuthModal("login");
     return;
@@ -631,116 +643,11 @@ async function openSharedSettingsModal(initialPanelName) {
     settingsModalState.accountAvatar.src = avatarSrcById(avatarId);
   }
   renderSharedAvatarPicker(meta.avatarId || "none");
-  renderSharedServerOrder();
   closeSharedSettingsPanels();
   if (initialPanelName) {
     toggleSharedSettingsPanel(initialPanelName);
   }
   setSharedSettingsHint("");
-}
-
-function renderSharedServerOrder() {
-  if (!settingsModalState.serverOrderList) return;
-  const settings = readJson(settingsKey, {});
-  const order = normalizeServerOrder(settings?.serverOrder);
-  settingsModalState.serverOrderList.innerHTML = order.map((serverId, index) => `
-    <div class="server-order-item" data-server="${escapeHtml(serverId)}" tabindex="0">
-      <span class="server-order-grip" aria-hidden="true"></span>
-      <span>
-        <strong>Server ${index + 1}</strong>
-        <small>${escapeHtml(serverLabels[serverId] || serverId)}</small>
-      </span>
-    </div>
-  `).join("");
-
-  bindSharedServerOrderDrag();
-}
-
-function bindSharedServerOrderDrag() {
-  const list = settingsModalState.serverOrderList;
-  if (!list) return;
-  let dragged = null;
-  let pointerId = null;
-  let startY = 0;
-  let active = false;
-
-  list.querySelectorAll(".server-order-item").forEach((item) => {
-    item.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 && event.pointerType === "mouse") return;
-      dragged = item;
-      pointerId = event.pointerId;
-      startY = event.clientY;
-      active = false;
-      item.setPointerCapture?.(pointerId);
-    });
-
-    item.addEventListener("pointermove", (event) => {
-      if (!dragged || event.pointerId !== pointerId) return;
-      if (!active && Math.abs(event.clientY - startY) < 6) return;
-      active = true;
-      event.preventDefault();
-      dragged.classList.add("dragging");
-      dragged.style.pointerEvents = "none";
-      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".server-order-item");
-      dragged.style.pointerEvents = "";
-      if (!target || target === dragged || target.parentElement !== list) return;
-      const targetRect = target.getBoundingClientRect();
-      if (event.clientY > targetRect.top + targetRect.height / 2) {
-        target.after(dragged);
-      } else {
-        target.before(dragged);
-      }
-      updateSharedServerOrderLabels();
-    });
-
-    const endDrag = (event) => {
-      if (!dragged || event.pointerId !== pointerId) return;
-      dragged.releasePointerCapture?.(pointerId);
-      dragged.classList.remove("dragging");
-      dragged.style.pointerEvents = "";
-      if (active) persistSharedServerOrderFromDom();
-      dragged = null;
-      pointerId = null;
-      active = false;
-    };
-
-    item.addEventListener("pointerup", endDrag);
-    item.addEventListener("pointercancel", endDrag);
-  });
-}
-
-function updateSharedServerOrderLabels() {
-  settingsModalState.serverOrderList?.querySelectorAll(".server-order-item").forEach((item, index) => {
-    const label = item.querySelector("strong");
-    if (label) label.textContent = `Server ${index + 1}`;
-  });
-}
-
-function persistSharedServerOrderFromDom() {
-  const list = settingsModalState.serverOrderList;
-  const order = [...(list?.querySelectorAll(".server-order-item") || [])]
-    .map((item) => String(item.dataset.server || ""))
-    .filter(Boolean);
-  if (!order.length) return;
-  const settings = readJson(settingsKey, {});
-  const nextSettings = { ...settings, serverOrder: normalizeServerOrder(order) };
-  localStorage.setItem(settingsKey, JSON.stringify(nextSettings));
-  updateSharedServerOrderLabels();
-  window.dispatchEvent(new CustomEvent("cinerune:settings-updated", { detail: nextSettings }));
-  setSharedSettingsHint("Server order updated.");
-}
-
-function normalizeServerOrder(value) {
-  const seen = new Set();
-  const order = Array.isArray(value)
-    ? value.map((entry) => String(entry || "").toLowerCase()).filter((entry) => defaultServerOrder.includes(entry))
-    : [];
-  const normalized = [...order, ...defaultServerOrder].filter((entry) => {
-    if (seen.has(entry)) return false;
-    seen.add(entry);
-    return true;
-  });
-  return normalized.slice(0, defaultServerOrder.length);
 }
 
 function closeSharedSettingsModal() {
@@ -1390,33 +1297,33 @@ export function initSharedNavSearch(options = {}) {
   }
 
   input.addEventListener("focus", () => {
-    if (sanitizeText(input.value, 80)) return;
+    if (String(input.value || "").trim()) return;
     renderSharedRecentSearches(suggestions);
   });
 
   input.addEventListener("input", () => {
-    const term = sanitizeText(input.value, 80);
-    if (term) hideSharedSearchSuggestions(suggestions);
+    const term = String(input.value || "");
+    if (term.trim()) hideSharedSearchSuggestions(suggestions);
   });
 
   input.addEventListener("input", debounce(async () => {
-    const term = sanitizeText(input.value, 80);
-    if (input.value !== term) input.value = term;
-    if (!term) {
+    const term = String(input.value || "").slice(0, 80);
+    const query = term.trim();
+    if (!query) {
       renderSharedRecentSearches(suggestions);
       options.onClear?.();
       return;
     }
-    if (term.length < 2) {
+    if (query.length < 2) {
       hideSharedSearchSuggestions(suggestions);
       return;
     }
     try {
-      const result = await searchCatalog(term, { page: 1 });
+      const result = await searchCatalog(query, { page: 1 });
       const items = result.all || [...(result.movies || []), ...(result.tv || [])];
-      const ranked = rankFuzzyResults(term, items);
-      renderSharedSearchSuggestions(suggestions, ranked, term, options.getProgress?.() || {});
-      options.onResults?.(result, term);
+      const ranked = rankFuzzyResults(result.correctedQuery || query, items);
+      renderSharedSearchSuggestions(suggestions, ranked, query, options.getProgress?.() || {});
+      options.onResults?.(result, query);
     } catch {
       hideSharedSearchSuggestions(suggestions);
       options.onError?.();
@@ -1474,13 +1381,6 @@ export function saveSharedRecentSearch(value) {
     .filter((entry) => normalizeSearchQuery(entry) !== normalized);
   entries.unshift(term);
   localStorage.setItem(recentSearchesKey, JSON.stringify(entries.slice(0, RECENT_SEARCH_LIMIT)));
-}
-
-function getSharedRecentSearches() {
-  const entries = readJson(recentSearchesKey, []);
-  return Array.isArray(entries)
-    ? entries.map((entry) => sanitizeText(entry, 80)).filter(Boolean).slice(0, RECENT_SEARCH_LIMIT)
-    : [];
 }
 
 function removeSharedRecentSearch(value) {
@@ -1579,8 +1479,14 @@ function hideSharedSearchSuggestions(container) {
 }
 
 export function normalizeAvatarId(value) {
+  const legacyMap = {
+    naruto: "ironman",
+    spider: "darthvader",
+    eren: "tonysoprano"
+  };
+  const mapped = legacyMap[value] || value;
   const fallback = avatarOptions[0]?.id || "none";
-  return avatarOptions.some((option) => option.id === value) ? value : fallback;
+  return avatarOptions.some((option) => option.id === mapped) ? mapped : fallback;
 }
 
 export function avatarSrcById(value) {
@@ -1593,68 +1499,8 @@ export function avatarDataUri(avatar) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Default profile"><rect width="128" height="128" rx="32" fill="#102035"/><circle cx="64" cy="48" r="23" fill="#6f8aa5"/><path d="M24 112c5-25 21-39 40-39s35 14 40 39" fill="#6f8aa5"/></svg>`;
     return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
   }
-  if (!avatar?.bg1) {
-    const safeLabel = escapeHtml(avatar?.label || "Avatar");
-    const initials = escapeHtml(String(avatar?.label || "AV").split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase() || "AV");
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#179de5"/><stop offset="100%" stop-color="#071528"/></linearGradient></defs><rect width="128" height="128" rx="32" fill="url(#g)"/><text x="64" y="73" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="34" font-weight="800" text-anchor="middle">${initials}</text></svg>`;
-    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-  }
-  const safeLabel = escapeHtml(avatar.label);
-  const safeBg1 = escapeHtml(avatar.bg1);
-  const safeBg2 = escapeHtml(avatar.bg2);
-  const safeSkin = escapeHtml(avatar.skin);
-  const safeHair = escapeHtml(avatar.hair);
-  const safeShirt = escapeHtml(avatar.shirt);
-  const safeEyes = escapeHtml(avatar.eyes);
-  const safeAccent = escapeHtml(avatar.accent);
-  const backHair = avatarBackHairSvg(avatar.hairStyle, safeHair);
-  const frontHair = avatarFrontHairSvg(avatar.hairStyle, safeHair);
-  const accessory = avatarAccessorySvg(avatar.accessory, safeAccent, safeEyes);
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}">
-      <defs><linearGradient id="bg-${avatar.id}" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="${safeBg1}" /><stop offset="100%" stop-color="${safeBg2}" /></linearGradient></defs>
-      <rect width="128" height="128" rx="32" fill="url(#bg-${avatar.id})" />
-      ${backHair}
-      <path d="M 24 128 C 24 96 104 96 104 128" fill="${safeShirt}" />
-      <path d="M 44 128 C 44 104 84 104 84 128" fill="rgba(255,255,255,0.15)" />
-      <rect x="54" y="70" width="20" height="24" rx="8" fill="${safeSkin}" />
-      <rect x="54" y="78" width="20" height="12" fill="rgba(0,0,0,0.1)" />
-      <rect x="36" y="28" width="56" height="60" rx="26" fill="${safeSkin}" />
-      ${frontHair}
-      <circle cx="50" cy="58" r="4" fill="${safeEyes}" />
-      <circle cx="78" cy="58" r="4" fill="${safeEyes}" />
-      <circle cx="42" cy="66" r="5" fill="#ff0000" opacity="0.12" />
-      <circle cx="86" cy="66" r="5" fill="#ff0000" opacity="0.12" />
-      <path d="M 58 68 Q 64 74 70 68" stroke="${safeEyes}" stroke-width="3" stroke-linecap="round" fill="none" />
-      ${accessory}
-    </svg>`.replace(/\s+/g, " ").trim();
+  const safeLabel = escapeHtml(avatar?.label || "Avatar");
+  const initials = escapeHtml(String(avatar?.label || "AV").split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase() || "AV");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${safeLabel}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#179de5"/><stop offset="100%" stop-color="#071528"/></linearGradient></defs><rect width="128" height="128" rx="32" fill="url(#g)"/><text x="64" y="73" fill="#e8f1fb" font-family="Arial, sans-serif" font-size="34" font-weight="800" text-anchor="middle">${initials}</text></svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
-function avatarBackHairSvg(style, color) {
-  if (style === "bald") return "";
-  if (style === "spiky") return `<path d="M 24 60 L 16 40 L 32 32 L 40 12 L 64 6 L 88 12 L 96 32 L 112 40 L 104 60 Z" fill="${color}" />`;
-  if (style === "long") return `<rect x="32" y="40" width="64" height="60" rx="16" fill="${color}" /><path d="M 32 80 L 32 110 C 32 120 44 120 44 110 L 44 80 Z" fill="${color}" /><path d="M 96 80 L 96 110 C 96 120 84 120 84 110 L 84 80 Z" fill="${color}" />`;
-  if (style === "bun") return `<circle cx="64" cy="18" r="14" fill="${color}" />`;
-  if (style === "bob") return `<rect x="30" y="36" width="68" height="48" rx="20" fill="${color}" />`;
-  return "";
-}
-
-function avatarFrontHairSvg(style, color) {
-  if (style === "bald") return "";
-  if (style === "spiky") return `<path d="M 32 52 L 36 26 L 48 38 L 54 18 L 64 36 L 74 18 L 80 38 L 92 26 L 96 52 Z" fill="${color}" />`;
-  if (style === "short") return `<path d="M 32 52 C 32 16 96 16 96 52 C 96 58 84 46 64 42 C 44 38 32 58 32 52 Z" fill="${color}" />`;
-  if (style === "long" || style === "bun") return `<path d="M 36 46 C 36 20 92 20 92 46 Q 78 34 64 34 Q 50 34 36 46 Z" fill="${color}" />`;
-  if (style === "bob") return `<path d="M 36 48 C 36 20 92 20 92 48 Q 78 34 64 34 Q 50 34 36 48 Z" fill="${color}" />`;
-  return "";
-}
-
-function avatarAccessorySvg(accessory, accent, eyes) {
-  if (accessory === "headband") return `<rect x="36" y="36" width="56" height="12" fill="${accent}" /><rect x="52" y="38" width="24" height="8" rx="2" fill="#ddd" />`;
-  if (accessory === "strawhat") return `<ellipse cx="64" cy="32" rx="46" ry="12" fill="${accent}" /><path d="M 42 30 C 42 8 86 8 86 30 Z" fill="${accent}" /><path d="M 43 26 C 43 28 85 28 85 26 Z" fill="#e03131" stroke="#e03131" stroke-width="3" />`;
-  if (accessory === "glasses_scar" || accessory === "glasses_goatee") return `<rect x="36" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" /><rect x="68" y="48" width="24" height="18" rx="6" stroke="${eyes}" stroke-width="3" fill="none" /><line x1="60" y1="57" x2="68" y2="57" stroke="${eyes}" stroke-width="3" />`;
-  if (accessory === "blindfold") return `<rect x="36" y="48" width="56" height="18" fill="${accent}" />`;
-  if (accessory === "earring") return `<circle cx="34" cy="64" r="4" fill="${accent}" /><circle cx="94" cy="64" r="4" fill="${accent}" />`;
-  if (accessory === "star") return `<path d="M 82 32 L 84 38 L 90 38 L 85 42 L 87 48 L 82 44 L 77 48 L 79 42 L 74 38 L 80 38 Z" fill="${accent}" />`;
-  return "";
 }

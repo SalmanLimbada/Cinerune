@@ -1,11 +1,11 @@
 import {
   searchCatalog
-} from "./catalog.js?v=20260513-fixes1";
-import { initSharedHeader, saveSharedRecentSearch } from "./shared-ui.js?v=20260513-fixes1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
-import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
-import { ensureSession } from "./auth-client.js";
-import { buildResumableWatchHref, sanitizeText, setPosterImage, readJson } from "./shared-utils.js?v=20260513-fixes1";
+} from "./catalog.js?v=20260515-bugfix2";
+import { initSharedHeader, saveSharedRecentSearch } from "./shared-ui.js?v=20260515-bugfix2";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260515-bugfix2";
+import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260515-bugfix2";
+import { getStoredSession } from "./auth-client.js";
+import { buildResumableWatchHref, sanitizeText, setPosterImage, readJson } from "./shared-utils.js?v=20260515-bugfix2";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = {
@@ -51,22 +51,24 @@ async function boot() {
   if (!term) {
     el.searchPageTitle.textContent = "Search";
     el.searchPageStatus.textContent = "Search for a movie or show.";
-    renderPosterCards([]);
+    el.searchPageGrid.innerHTML = "";
+    renderPagination("", 1, 1);
     return;
   }
 
+  saveSharedRecentSearch(term);
   el.searchPageTitle.textContent = `Search: ${term}`;
   el.searchPageStatus.textContent = "Loading results...";
+  renderSkeletonCards(el.searchPageGrid, 21);
 
   try {
-    const result = await searchCatalog(term, { page, pages: 4 });
-    let items = result.all || [...(result.movies || []), ...(result.tv || [])];
-    const ranked = rankFuzzyResults(term, items);
+    const { items, totalPages, page: displayPage, correctedQuery } = await loadSearchGridResults(term, page);
+    const ranked = rankFuzzyResults(correctedQuery || term, items);
     renderPosterCards(ranked);
-    renderPagination(term, page, result.totalPages || 1);
+    renderPagination(term, displayPage, totalPages || 1);
     el.searchPageTitle.textContent = `Search: ${term}`;
     el.searchPageStatus.textContent = ranked.length
-      ? `Page ${page} of ${Math.max(1, Number(result.totalPages || 1))} for "${term}".`
+      ? `Page ${displayPage} of ${Math.max(1, Number(totalPages || 1))} for "${term}".`
       : `No results found for "${term}".`;
   } catch {
     renderPosterCards([]);
@@ -77,6 +79,10 @@ async function boot() {
 
 function renderPosterCards(items) {
   el.searchPageGrid.innerHTML = "";
+  if (!items.length) {
+    renderEmptyState();
+    return;
+  }
   const fragment = document.createDocumentFragment();
 
   items.forEach((item) => {
@@ -103,6 +109,41 @@ function renderPosterCards(items) {
   initDragScroll();
 }
 
+async function loadSearchGridResults(term, pageNumber) {
+  const result = await searchCatalog(term, { page: 1, pages: 20 });
+  const allItems = result.all || [...(result.movies || []), ...(result.tv || [])];
+  const rankedPool = rankFuzzyResults(result.correctedQuery || term, allItems);
+  const totalResults = rankedPool.length;
+  const totalPages = getSearchDisplayPageCount(totalResults);
+  const currentPage = Math.max(1, Math.min(totalPages, Number(pageNumber || 1)));
+  const offset = (currentPage - 1) * 21;
+  const limit = getSearchDisplayPageSize(currentPage, totalResults);
+
+  return {
+    items: rankedPool.slice(offset, offset + limit),
+    totalPages,
+    page: currentPage,
+    correctedQuery: result.correctedQuery || ""
+  };
+}
+
+function getSearchDisplayPageCount(totalResults) {
+  const total = Math.max(0, Number(totalResults || 0) || 0);
+  if (total <= 21) return 1;
+  const fullPages = Math.floor(total / 21);
+  const remainder = total % 21;
+  if (!remainder) return fullPages;
+  return remainder < 7 ? Math.max(1, fullPages) : fullPages + 1;
+}
+
+function getSearchDisplayPageSize(pageNumber, totalResults) {
+  const total = Math.max(0, Number(totalResults || 0) || 0);
+  const totalPages = getSearchDisplayPageCount(total);
+  const currentPage = Math.max(1, Math.min(totalPages, Number(pageNumber || 1)));
+  if (currentPage < totalPages) return 21;
+  return Math.max(0, total - ((currentPage - 1) * 21));
+}
+
 function rankFuzzyResults(query, items) {
   const FuseCtor = window.Fuse;
   if (!FuseCtor || !String(query || "").trim() || !Array.isArray(items) || items.length < 2) return items || [];
@@ -119,14 +160,33 @@ function rankFuzzyResults(query, items) {
 }
 
 async function loadActiveProgress() {
-  try {
-    const session = await ensureSession();
-    const progress = readJson(getProgressKey(session), null);
-    if (progress && typeof progress === "object") return progress;
-  } catch {
-    // Use guest progress below when auth is unavailable.
-  }
+  const session = getStoredSession();
+  const progress = readJson(getProgressKey(session), null);
+  if (progress && typeof progress === "object") return progress;
   return readJson(getProgressKey(null), readJson(legacyProgressKey, {})) || {};
+}
+
+function renderEmptyState() {
+  el.searchPageGrid.innerHTML = `
+    <div class="empty-state search-empty-state">
+      <div class="empty-state-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/><path d="M8.5 10h5"/><path d="M10 13h2"/></svg>
+      </div>
+      <h3>No results found</h3>
+      <p class="tiny muted">Try a different movie or show title.</p>
+    </div>
+  `;
+}
+
+function renderSkeletonCards(container, count = 21) {
+  if (!container) return;
+  container.innerHTML = Array.from({ length: count }, () => `
+    <article class="poster-card skeleton-card" aria-hidden="true">
+      <span class="skeleton skeleton-poster"></span>
+      <span class="skeleton skeleton-line"></span>
+      <span class="skeleton skeleton-line short"></span>
+    </article>
+  `).join("");
 }
 
 function renderPagination(term, current, totalPages) {

@@ -36,7 +36,24 @@ export function normalizePlaybackTimestamp(value, duration = 0) {
   return timestamp <= 24 * 60 * 60 ? timestamp : 0;
 }
 
-export function buildWatchHref(id, mediaType, season = 1, episode = 1, resume = false) {
+export function isContinueProgressEntry(entry) {
+  return normalizePlaybackTimestamp(entry?.timestamp, entry?.duration) > 8;
+}
+
+export function dedupeContinueProgressEntries(entries = []) {
+  const map = new Map();
+  (entries || []).filter(isContinueProgressEntry).forEach((entry) => {
+    const key = `${entry?.mediaType === "tv" ? "tv" : "movie"}:${Number(entry?.id || 0)}`;
+    if (!Number(entry?.id || 0)) return;
+    const previous = map.get(key);
+    if (!previous || Number(entry?.updatedAt || 0) > Number(previous?.updatedAt || 0)) {
+      map.set(key, entry);
+    }
+  });
+  return [...map.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+}
+
+export function buildWatchHref(id, mediaType, season = 1, episode = 1, resume = false, server = "") {
   const url = new URL("./watch.html", window.location.href);
   url.searchParams.set("id", String(id));
   url.searchParams.set("type", mediaType === "tv" ? "tv" : "movie");
@@ -46,6 +63,9 @@ export function buildWatchHref(id, mediaType, season = 1, episode = 1, resume = 
   }
   if (resume) {
     url.searchParams.set("resume", "1");
+  }
+  if (server) {
+    url.searchParams.set("server", String(server));
   }
   return url.toString();
 }
@@ -59,18 +79,17 @@ export function getLatestProgressEntry(progress, id, mediaType) {
     .filter((entry) => (
       entry?.mediaType === normalizedType
       && Number(entry?.id || 0) === normalizedId
-      && normalizePlaybackTimestamp(entry?.timestamp, entry?.duration) > 8
-      && Number(entry?.progress || 0) < 98
+      && isContinueProgressEntry(entry)
     ))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0] || null;
 }
 
-export function buildResumableWatchHref(item, progress, fallbackResume = false) {
+export function buildResumableWatchHref(item, progress, fallbackResume = false, server = "") {
   const mediaType = item?.mediaType === "tv" ? "tv" : "movie";
   const latest = getLatestProgressEntry(progress, item?.id, mediaType);
   const season = latest?.season || item?.season || item?.defaultSeason || 1;
   const episode = latest?.episode || item?.episode || item?.defaultEpisode || 1;
-  return buildWatchHref(item?.id, mediaType, season, episode, Boolean(latest) || fallbackResume);
+  return buildWatchHref(item?.id, mediaType, season, episode, Boolean(latest) || fallbackResume, server);
 }
 
 export function formatSeconds(value) {

@@ -23,7 +23,7 @@ export function initDragScroll(selector = ".poster-row, .explorer-rail") {
         rafId = 0;
         return;
       }
-      currentScrollLeft += diff * 0.35;
+      currentScrollLeft += diff * 0.68;
       rail.scrollLeft = currentScrollLeft;
       rafId = window.requestAnimationFrame(animate);
     };
@@ -64,7 +64,7 @@ export function initDragScroll(selector = ".poster-row, .explorer-rail") {
       }
       event.preventDefault();
       if (Math.abs(delta) > 4) moved = true;
-      targetScrollLeft = startScrollLeft - delta;
+      targetScrollLeft = startScrollLeft - delta * 1.32;
       if (!rafId) {
         rafId = window.requestAnimationFrame(animate);
       }

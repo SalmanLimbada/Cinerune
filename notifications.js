@@ -1,11 +1,13 @@
-import { ensureSession } from "./auth-client.js";
-import { fetchItemDetailsById } from "./catalog.js?v=20260513-fixes1";
-import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb } from "./shared-state.js?v=20260513-fixes1";
-import { buildWatchHref, escapeHtml, readJson } from "./shared-utils.js?v=20260513-fixes1";
+import { apiRequest, authHeaders, ensureSession } from "./auth-client.js";
+import { fetchItemDetailsById } from "./catalog.js?v=20260515-bugfix2";
+import { getBookmarksKey, getNotificationReadKey, getProgressKey, initConfiguredTmdb } from "./shared-state.js?v=20260515-bugfix2";
+import { buildWatchHref, escapeHtml, readJson } from "./shared-utils.js?v=20260515-bugfix2";
 
 const NEW_EPISODE_WINDOW_DAYS = 45;
 
 let catalogReady = false;
+const showCache = new Map();
+const SHOW_CACHE_TTL_MS = 30 * 60 * 1000;
 
 export async function initHeaderNotifications() {
   const wrap = document.getElementById("notificationsWrap");
@@ -15,7 +17,6 @@ export async function initHeaderNotifications() {
   const list = document.getElementById("notificationsList");
   const markAll = document.getElementById("notificationsMarkAll");
   if (!wrap || !button || !badge || !menu || !list) return;
-  if (wrap.dataset.headerNotificationsReady === "1") return;
 
   setupCatalog();
   let session = null;
@@ -28,40 +29,63 @@ export async function initHeaderNotifications() {
   const signedIn = Boolean(session?.user);
   wrap.toggleAttribute("hidden", !signedIn);
   if (!signedIn) return;
+  if (wrap.dataset.headerNotificationsReady === "1") return;
   wrap.dataset.headerNotificationsReady = "1";
 
   const state = await loadNotificationState(session);
   renderNotifications(list, state, { compact: true });
   syncBadge(badge, markAll, state);
+  const refreshState = async () => {
+    const freshState = await loadNotificationState(session);
+    state.notifications = freshState.notifications;
+    state.readIds = freshState.readIds;
+    renderNotifications(list, state, { compact: true });
+    syncBadge(badge, markAll, state);
+  };
+  window.setTimeout(refreshState, 0);
 
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      await refreshState();
+    } catch {
+      // Keep the existing menu contents if a refresh fails.
+    }
     const hidden = menu.hasAttribute("hidden");
     closeAccountMenu();
     menu.toggleAttribute("hidden", !hidden);
     button.setAttribute("aria-expanded", hidden ? "true" : "false");
     updateMenuScrimVisibility();
   });
+  window.addEventListener("focus", () => { void refreshState(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void refreshState();
+  });
 
   markAll?.addEventListener("click", () => {
-    markAllRead(state, session);
+    state.notifications.forEach((item) => state.readIds.add(item.readId));
     renderNotifications(list, state, { compact: true });
     syncBadge(badge, markAll, state);
+    void saveReadIds(state, session).then(() => refreshState());
   });
 
   list.addEventListener("click", (event) => {
     const readButton = event.target.closest(".notification-read-btn");
     if (readButton) {
-      markRead(state, session, readButton.dataset.readId);
+      const readId = readButton.dataset.readId;
+      if (readId) state.readIds.add(readId);
       renderNotifications(list, state, { compact: true });
       syncBadge(badge, markAll, state);
+      readButton.disabled = true;
+      void saveReadIds(state, session).then(() => refreshState());
       return;
     }
 
     const link = event.target.closest(".notification-link");
     if (!link) return;
     const item = link.closest(".notification-item");
-    markRead(state, session, item?.dataset.readId);
-    saveReadIds(state, session);
+    void markRead(state, session, item?.dataset.readId);
   });
 
   document.addEventListener("click", (event) => {
@@ -87,12 +111,7 @@ function getMenuScrim() {
 
 function updateMenuScrimVisibility() {
   const scrim = getMenuScrim();
-  const accountMenu = document.getElementById("accountMenu");
-  const notificationsMenu = document.getElementById("notificationsMenu");
-  const menusOpen = [accountMenu, notificationsMenu]
-    .some((menu) => menu && !menu.hasAttribute("hidden"));
-  const shouldShowScrim = menusOpen && window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
-  scrim.toggleAttribute("hidden", !shouldShowScrim);
+  scrim.setAttribute("hidden", "");
 }
 
 export async function initInboxPage() {
@@ -120,25 +139,34 @@ export async function initInboxPage() {
   renderNotifications(list, state, { compact: false });
   updateInboxStatus(status, markAll, state);
 
-  markAll?.addEventListener("click", () => {
-    markAllRead(state, session);
+  const refreshInbox = async () => {
+    const freshState = await loadNotificationState(session);
+    state.notifications = freshState.notifications;
+    state.readIds = freshState.readIds;
     renderNotifications(list, state, { compact: false });
     updateInboxStatus(status, markAll, state);
+  };
+
+  markAll?.addEventListener("click", () => {
+    void markAllRead(state, session).then(refreshInbox);
   });
 
   list.addEventListener("click", (event) => {
     const readButton = event.target.closest(".notification-read-btn");
     if (!readButton) return;
-    markRead(state, session, readButton.dataset.readId);
+    const readId = readButton.dataset.readId;
+    if (readId) state.readIds.add(readId);
     renderNotifications(list, state, { compact: false });
     updateInboxStatus(status, markAll, state);
+    readButton.disabled = true;
+    void saveReadIds(state, session).then(refreshInbox);
   });
 }
 
-async function loadNotificationState(session) {
+export async function loadNotificationState(session) {
   const bookmarks = readJson(getBookmarksKey(session), {});
   const progress = readJson(getProgressKey(session), {});
-  const readIds = new Set(readJson(getNotificationReadKey(session), []));
+  const readIds = new Set(await loadReadIds(session));
   const watchedShows = Object.values(bookmarks || {})
     .filter((entry) => entry?.mediaType === "tv" && (entry?.status === "watched" || entry?.status === "watching"))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
@@ -150,13 +178,13 @@ async function loadNotificationState(session) {
   return { notifications, readIds };
 }
 
-async function buildEpisodeNotification(entry, progress) {
+export async function buildEpisodeNotification(entry, progress) {
   const id = Number(entry?.id || 0);
   if (!id) return null;
 
   let item = null;
   try {
-    item = await fetchItemDetailsById(id, "tv", { forceEpisodeRefresh: true });
+    item = await fetchCachedShowDetails(id);
   } catch {
     return null;
   }
@@ -233,24 +261,29 @@ function unreadCount(state) {
   return state.notifications.filter((item) => !state.readIds.has(item.readId)).length;
 }
 
-function markRead(state, session, readId) {
+async function markRead(state, session, readId) {
   if (!readId) return;
   state.readIds.add(readId);
-  saveReadIds(state, session);
+  await saveReadIds(state, session);
 }
 
-function markAllRead(state, session) {
+async function markAllRead(state, session) {
   state.notifications.forEach((item) => state.readIds.add(item.readId));
-  saveReadIds(state, session);
+  await saveReadIds(state, session);
 }
 
-function saveReadIds(state, session) {
-  const values = [...state.readIds].slice(-200);
+async function saveReadIds(state, session) {
+  const values = [...state.readIds].slice(-500);
   state.readIds = new Set(values);
-  localStorage.setItem(getNotificationReadKey(session), JSON.stringify(values));
+  if (!session?.user) {
+    localStorage.setItem(getNotificationReadKey(session), JSON.stringify(values));
+    return;
+  }
+  const remote = await pushReadIds(session, values);
+  if (remote.length) state.readIds = new Set(remote);
 }
 
-function getLatestWatchedEpisode(progress, showId) {
+export function getLatestWatchedEpisode(progress, showId) {
   const entries = Object.values(progress || {})
     .filter((entry) => entry?.mediaType === "tv" && Number(entry.id) === Number(showId))
     .sort((a, b) => {
@@ -279,25 +312,65 @@ function closeAccountMenu() {
   accountBtn?.classList.remove("active");
 }
 
-function buildNotificationReadId(item) {
+export function buildNotificationReadId(item) {
   return `tv:${Number(item.id)}:${Number(item.season)}:${Number(item.episode)}:${String(item.airDate || "")}`;
 }
 
-function isEpisodeAfter(seasonA, episodeA, seasonB, episodeB) {
+export function isEpisodeAfter(seasonA, episodeA, seasonB, episodeB) {
   if (Number(seasonA) !== Number(seasonB)) return Number(seasonA) > Number(seasonB);
   return Number(episodeA) > Number(episodeB);
 }
 
-function isReleasedDate(value) {
+export function isReleasedDate(value) {
   if (!value) return false;
   const time = Date.parse(value);
   return Number.isFinite(time) && time <= Date.now() + 24 * 60 * 60 * 1000;
 }
 
-function isRecentReleasedDate(value) {
+export function isRecentReleasedDate(value) {
   if (!isReleasedDate(value)) return false;
   const time = Date.parse(value);
   return Date.now() - time <= NEW_EPISODE_WINDOW_DAYS * 86400000;
+}
+
+async function fetchCachedShowDetails(id) {
+  const key = String(Number(id));
+  const cached = showCache.get(key);
+  if (cached && Date.now() - cached.timestamp < SHOW_CACHE_TTL_MS) {
+    return cached.item;
+  }
+  const item = await fetchItemDetailsById(Number(id), "tv", { forceEpisodeRefresh: true });
+  showCache.set(key, { item, timestamp: Date.now() });
+  return item;
+}
+
+async function loadReadIds(session) {
+  if (!session?.user) return readJson(getNotificationReadKey(session), []);
+  try {
+    const state = await apiRequest("/notifications/read", {
+      method: "GET",
+      headers: authHeaders(session)
+    });
+    const remote = state?.notificationReadIds;
+    return Array.isArray(remote) ? remote.slice(-500) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function pushReadIds(session, values) {
+  if (!session?.user) return [];
+  try {
+    const state = await apiRequest("/notifications/read", {
+      method: "POST",
+      headers: authHeaders(session),
+      body: { notificationReadIds: values }
+    });
+    return Array.isArray(state?.notificationReadIds) ? state.notificationReadIds : [];
+  } catch {
+    // Keep local read state if the cloud write fails.
+    return [];
+  }
 }
 
 function formatShortDate(value) {

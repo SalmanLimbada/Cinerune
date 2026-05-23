@@ -1,19 +1,32 @@
 import {
   fetchGenreOptions,
   fetchCountryOptions,
+  fetchCountryContentCounts,
   fetchTitlesByGenre,
   fetchTitlesByCountry
-} from "./catalog.js?v=20260513-fixes1";
-import { initSharedHeader } from "./shared-ui.js?v=20260513-fixes1";
-import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260513-fixes1";
-import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260513-fixes1";
-import { ensureSession } from "./auth-client.js";
-import { buildResumableWatchHref, escapeHtml, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260513-fixes1";
+} from "./catalog.js?v=20260515-bugfix2";
+import { initSharedHeader } from "./shared-ui.js?v=20260515-bugfix2";
+import { balancePosterGrid, initDragScroll } from "./drag-scroll.js?v=20260515-bugfix2";
+import { getProgressKey, initConfiguredTmdb, legacyProgressKey } from "./shared-state.js?v=20260515-bugfix2";
+import { getStoredSession } from "./auth-client.js";
+import { buildResumableWatchHref, escapeHtml, readJson, sanitizeText, setPosterImage } from "./shared-utils.js?v=20260515-bugfix2";
 
 const query = new URLSearchParams(window.location.search);
 const INPUT_LIMITS = { valueMax: 12, nameMax: 40 };
 const GRID_PAGE_SIZE = 24;
 const API_PAGE_SIZE = 20;
+const COUNTRY_CACHE_KEY = "cinerune:country-cache";
+const COUNTRY_CACHE_REFRESH_KEY = "cinerune:country-cache-refreshing";
+const COUNTRY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const COUNTRY_CACHE_REFRESH_TTL_MS = 10 * 60 * 1000;
+const FALLBACK_QUALIFIED_COUNTRIES = [
+  ["AR", "Argentina"], ["AU", "Australia"], ["BR", "Brazil"], ["CA", "Canada"], ["CN", "China"],
+  ["DE", "Germany"], ["DK", "Denmark"], ["ES", "Spain"], ["FI", "Finland"], ["FR", "France"],
+  ["GB", "United Kingdom"], ["HK", "Hong Kong"], ["ID", "Indonesia"], ["IN", "India"], ["IT", "Italy"],
+  ["JP", "Japan"], ["KR", "South Korea"], ["MX", "Mexico"], ["NL", "Netherlands"], ["NO", "Norway"],
+  ["PH", "Philippines"], ["PL", "Poland"], ["RU", "Russia"], ["SE", "Sweden"], ["TH", "Thailand"],
+  ["TR", "Turkey"], ["US", "United States"]
+].map(([code, name]) => ({ code, name }));
 const mode = query.get("mode") === "country" ? "country" : "genre";
 let mediaType = query.get("type") === "tv" ? "tv" : "movie";
 let selectedValue = sanitizeText(query.get("value"), INPUT_LIMITS.valueMax);
@@ -33,6 +46,7 @@ const el = {
   browseTvSection: document.getElementById("browseTvSection"),
   browseTvGrid: document.getElementById("browseTvGrid"),
   browsePagination: document.getElementById("browsePagination"),
+  browseBackBtn: document.getElementById("browseBackBtn"),
   posterCardTemplate: document.getElementById("posterCardTemplate")
 };
 
@@ -53,6 +67,14 @@ boot();
 async function boot() {
   initSharedHeader();
   initConfiguredTmdb();
+  el.browseBackBtn?.addEventListener("click", () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.location.href = "./index.html";
+    }
+  });
+  el.browseBackBtn?.toggleAttribute("hidden", !selectedValue);
   activeProgress = await loadActiveProgress();
 
 
@@ -94,7 +116,10 @@ async function boot() {
 async function renderOptions() {
   if (!el.browseOptionsGrid) return;
 
-  const data = mode === "country" ? await fetchCountryOptions() : await ensureGenreOptions();
+  if (mode === "country") {
+    el.browseOptionsGrid.innerHTML = `<p class="tiny muted browse-loading">Filtering countries...</p>`;
+  }
+  const data = mode === "country" ? await loadQualifiedCountryOptions() : await ensureGenreOptions();
   const options = mode === "country" ? (data || []) : [...state.genreIndex.byKey.values()];
   state.options = options;
 
@@ -131,6 +156,58 @@ async function renderOptions() {
       window.location.href = url.toString();
     });
   });
+}
+
+async function loadQualifiedCountryOptions() {
+  const cached = readJson(COUNTRY_CACHE_KEY, null);
+  if (
+    cached?.timestamp
+    && Array.isArray(cached.countries)
+    && Date.now() - Number(cached.timestamp || 0) < COUNTRY_CACHE_TTL_MS
+  ) {
+    return cached.countries.filter((country) => country.code !== "DD" && !/east germany/i.test(country.name || ""));
+  }
+
+  void refreshQualifiedCountryCache();
+  return FALLBACK_QUALIFIED_COUNTRIES;
+}
+
+async function refreshQualifiedCountryCache() {
+  const refreshingAt = Number(localStorage.getItem(COUNTRY_CACHE_REFRESH_KEY) || 0);
+  if (refreshingAt && Date.now() - refreshingAt < COUNTRY_CACHE_REFRESH_TTL_MS) return;
+  localStorage.setItem(COUNTRY_CACHE_REFRESH_KEY, String(Date.now()));
+  try {
+    const countries = (await fetchCountryOptions())
+      .filter((country) => country.code !== "DD" && !/east germany/i.test(country.name || ""));
+    const batchSize = 15;
+    const delayMs = 120;
+    const checked = [];
+    for (let index = 0; index < countries.length; index += batchSize) {
+      const batch = countries.slice(index, index + batchSize);
+      const results = await Promise.all(batch.map(async (country) => {
+        const counts = await fetchCountryContentCounts(country.code);
+        return {
+          country,
+          qualifies: counts.total >= 20 && counts.movie >= 10 && counts.tv >= 10
+        };
+      }));
+      checked.push(...results);
+      if (index + batchSize < countries.length) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    const qualified = checked.filter((entry) => entry.qualifies).map((entry) => entry.country);
+    if (!qualified.length) return;
+    localStorage.setItem(COUNTRY_CACHE_KEY, JSON.stringify({
+      timestamp: Date.now(),
+      countries: qualified
+    }));
+    if (mode === "country" && !selectedValue) {
+      void renderOptions();
+    }
+  } finally {
+    localStorage.removeItem(COUNTRY_CACHE_REFRESH_KEY);
+  }
 }
 
 function renderBrowsePagination(totalPages) {
@@ -354,6 +431,7 @@ function syncSelectedGenreName() {
 }
 
 async function loadBrowseData() {
+  renderSkeletonCards(mediaType === "movie" ? el.browseMoviesGrid : el.browseTvGrid, GRID_PAGE_SIZE);
   const source = getSourcePageWindow(page);
   const first = await fetchBrowseSourcePage(source.firstPage);
   const totalSourcePages = Math.max(1, Number(first.totalPages || 1));
@@ -508,14 +586,21 @@ function renderPosterCards(container, items) {
   initDragScroll();
 }
 
+function renderSkeletonCards(container, count = GRID_PAGE_SIZE) {
+  if (!container) return;
+  container.innerHTML = Array.from({ length: count }, () => `
+    <article class="poster-card skeleton-card" aria-hidden="true">
+      <span class="skeleton skeleton-poster"></span>
+      <span class="skeleton skeleton-line"></span>
+      <span class="skeleton skeleton-line short"></span>
+    </article>
+  `).join("");
+}
+
 async function loadActiveProgress() {
-  try {
-    const session = await ensureSession();
-    const progress = readJson(getProgressKey(session), null);
-    if (progress && typeof progress === "object") return progress;
-  } catch {
-    // Fall back to local guest progress.
-  }
+  const session = getStoredSession();
+  const progress = readJson(getProgressKey(session), null);
+  if (progress && typeof progress === "object") return progress;
   return readJson(getProgressKey(null), readJson(legacyProgressKey, {})) || {};
 }
 
@@ -523,7 +608,9 @@ function countryFlagMarkup(code) {
   const normalized = String(code || "").trim().toLowerCase();
   const mapped = normalizeCountryFlagCode(normalized);
   if (!mapped) return "";
-  const src = `https://flagcdn.com/24x18/${mapped}.png`;
+  const src = mapped.includes("-")
+    ? `https://flagcdn.com/${mapped}.svg`
+    : `https://flagcdn.com/24x18/${mapped}.png`;
   return `<img class="country-flag-image" src="${escapeHtml(src)}" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
 }
 
@@ -537,11 +624,13 @@ function normalizeCountryFlagCode(code) {
     zr: "cd",
     dd: "de",
     fx: "fr",
-    cs: "rs",
+    cs: "cz",
+    xc: "cz",
+    xi: "gb-nir",
     su: "ru",
     an: "nl",
     bu: "mm"
   };
   const mapped = aliases[value] || value;
-  return /^[a-z]{2}$/.test(mapped) ? mapped : "";
+  return /^[a-z]{2}(?:-[a-z]{3})?$/.test(mapped) ? mapped : "";
 }

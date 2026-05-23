@@ -55,12 +55,15 @@ export async function ensureSession() {
       setStoredSession(refreshed);
       return refreshed;
     }
-  } catch {
-    // fall through
+  } catch (error) {
+    if (error?.status === 401 || error?.status === 403) {
+      clearStoredSession();
+      return null;
+    }
+    return session;
   }
 
-  clearStoredSession();
-  return null;
+  return session;
 }
 
 export async function apiRequest(path, options = {}) {
@@ -93,6 +96,32 @@ export async function apiRequest(path, options = {}) {
 export function authHeaders(session) {
   const token = session?.access_token;
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function refreshStoredSessionUser() {
+  const session = await ensureSession();
+  if (!session?.access_token) return session;
+
+  const currentUser = await apiRequest("/auth/me", {
+    method: "GET",
+    headers: authHeaders(session)
+  });
+  const user = currentUser?.user || currentUser;
+  if (!user?.id) return session;
+
+  const refreshed = {
+    ...session,
+    user: {
+      ...(session.user || {}),
+      ...user,
+      user_metadata: {
+        ...(session.user?.user_metadata || {}),
+        ...(user.user_metadata || {})
+      }
+    }
+  };
+  setStoredSession(refreshed);
+  return refreshed;
 }
 
 function safeParseJson(text) {

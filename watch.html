@@ -2,14 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#060e1e" />
     <title>Watch | Cinerune</title>
     <meta name="description" content="Cinerune watch page" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link rel="icon" href="./favicon.svg?v=20260430" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="styles.css?v=20260513-fixes1" />
+    <link rel="stylesheet" href="styles.css?v=20260515-bugfix2" />
   </head>
   <body class="watch-body">
     <div class="watch-atmosphere" aria-hidden="true"></div>
@@ -28,7 +29,9 @@
         <a class="chip chip-link" href="./top-rated.html?type=movie">Top Rated</a>
       </nav>
       <div class="watch-top-actions">
-        <a id="watchListsLink" class="pill-btn ghost" href="./lists.html" hidden>Bookmarks</a>
+        <a id="watchListsLink" class="icon-pill bookmark-pill" href="./lists.html" aria-label="Bookmarks" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16l-6-4-6 4z"/></svg>
+        </a>
         <div id="notificationsWrap" class="account-menu-wrap" hidden>
           <button id="notificationsBtn" class="icon-pill" type="button" aria-label="Notifications" aria-expanded="false">
             <span class="notif-icon" aria-hidden="true">&#128276;</span>
@@ -47,7 +50,7 @@
         </div>
         <div id="watchAccountMenuWrap" class="account-menu-wrap">
           <button id="watchAccountBtn" class="pill-btn account-pill" type="button">
-            <img id="watchAccountAvatar" class="nav-avatar" alt="Selected avatar" />
+            <img id="watchAccountAvatar" class="nav-avatar" alt="Selected avatar" hidden />
             <span id="watchAccountLabel">Login</span>
           </button>
           <div id="watchAccountMenu" class="account-menu" hidden>
@@ -109,7 +112,7 @@
             <div class="dropdown" id="bookmarkDropdown">
               <button id="bookmarkTrigger" class="control-btn" type="button" hidden>
                 <span class="control-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 4h12v16l-6-4-6 4z"/></svg></span>
-                <span>Bookmark</span>
+                <span class="sr-only">Bookmark</span>
               </button>
               <span id="bookmarkToast" class="bookmark-toast" hidden></span>
               <div id="bookmarkMenu" class="dropdown-menu" hidden>
@@ -143,6 +146,7 @@
             <select id="seasonSelect"></select>
           </div>
           <p id="episodeCountText" class="tiny muted" hidden></p>
+          <div id="episodePager" class="episode-pager" hidden></div>
           <div id="episodeGrid" class="episode-grid"></div>
         </section>
 
@@ -159,7 +163,7 @@
       </section>
 
       <aside class="watch-side-card">
-        <img id="sidePoster" class="side-poster" alt="Poster" loading="lazy" decoding="async" />
+        <img id="sidePoster" class="side-poster" alt="Poster" loading="eager" decoding="async" fetchpriority="high" />
         <p id="watchTagline" class="tiny muted"></p>
         <h2 id="watchTitle">Loading...</h2>
         <div id="watchMeta" class="watch-badges"></div>
@@ -205,6 +209,6 @@
       })();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.min.js"></script>
-    <script type="module" src="watch.js?v=20260513-fixes1"></script>
+    <script type="module" src="watch.js?v=20260515-bugfix2"></script>
   </body>
 </html>

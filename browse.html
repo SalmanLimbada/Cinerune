@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link rel="icon" href="./favicon.svg?v=20260430" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="styles.css?v=20260513-fixes1" />
+    <link rel="stylesheet" href="styles.css?v=20260515-bugfix2" />
   </head>
   <body class="home-body">
     <div class="home-atmosphere" aria-hidden="true"></div>
@@ -45,7 +45,7 @@
       </div>
       <div id="accountMenuWrap" class="account-menu-wrap">
         <button id="toggleAuth" class="pill-btn account-pill" type="button">
-          <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" />
+          <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" hidden />
           <span id="authButtonLabel">Login</span>
         </button>
         <div id="accountMenu" class="account-menu" hidden>
@@ -82,6 +82,10 @@
         </div>
       </div>
     </header>
+
+    <button id="browseBackBtn" class="page-back-btn" type="button" aria-label="Go back" hidden>
+      <span aria-hidden="true">←</span>
+    </button>
 
     <main class="home-shell">
       <section class="home-row">
@@ -147,6 +151,6 @@
       })();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.min.js"></script>
-    <script type="module" src="browse.js?v=20260513-fixes1"></script>
+    <script type="module" src="browse.js?v=20260515-bugfix2"></script>
   </body>
 </html>

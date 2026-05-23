@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link rel="icon" href="./favicon.svg?v=20260430" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="styles.css?v=20260513-fixes1" />
+    <link rel="stylesheet" href="styles.css?v=20260515-bugfix2" />
   </head>
   <body class="home-body is-home">
     <div class="home-atmosphere" aria-hidden="true"></div>
@@ -53,7 +53,7 @@
         </div>
         <div id="accountMenuWrap" class="account-menu-wrap">
           <button id="toggleAuth" class="pill-btn account-pill" type="button">
-            <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" />
+            <img id="authAvatarThumb" class="nav-avatar" alt="Selected avatar" hidden />
             <span id="authButtonLabel">Login</span>
           </button>
           <div id="accountMenu" class="account-menu" hidden>
@@ -330,6 +330,7 @@
       <section id="continueSection" class="home-row" hidden>
         <div class="row-head">
           <h2>Continue Watching</h2>
+          <a class="view-all-btn row-title-link" href="./lists.html?view=continue">View All</a>
           <div class="row-actions">
             <button id="continuePrevBtn" class="arrow-btn" type="button" aria-label="Scroll continue watching left">&#8592;</button>
             <button id="continueNextBtn" class="arrow-btn" type="button" aria-label="Scroll continue watching right">&#8594;</button>
@@ -341,6 +342,7 @@
       <section id="recommendedSection" class="home-row">
         <div class="row-head">
           <h2>Recommended</h2>
+          <a class="view-all-btn row-title-link" href="./recommended.html">View All</a>
           <div class="row-actions">
             <button id="recommendedPrevBtn" class="arrow-btn" type="button" aria-label="Scroll recommended left">&#8592;</button>
             <button id="recommendedNextBtn" class="arrow-btn" type="button" aria-label="Scroll recommended right">&#8594;</button>
@@ -352,6 +354,7 @@
       <section id="trendingSection" class="home-row">
         <div class="row-head">
           <h2>Trending</h2>
+          <a class="view-all-btn row-title-link" href="./trending.html">View All</a>
           <div class="row-actions">
             <button id="trendingPrevBtn" class="arrow-btn" type="button" aria-label="Scroll trending left">&#8592;</button>
             <button id="trendingNextBtn" class="arrow-btn" type="button" aria-label="Scroll trending right">&#8594;</button>
@@ -363,6 +366,7 @@
       <section id="popularSection" class="home-row">
         <div class="row-head">
           <h2>Popular</h2>
+          <a class="view-all-btn row-title-link" href="./popular.html">View All</a>
           <div class="row-actions">
             <button id="popularPrevBtn" class="arrow-btn" type="button" aria-label="Scroll popular left">&#8592;</button>
             <button id="popularNextBtn" class="arrow-btn" type="button" aria-label="Scroll popular right">&#8594;</button>
@@ -374,6 +378,7 @@
       <section id="airingTodaySection" class="home-row">
         <div class="row-head">
           <h2>Airing Today</h2>
+          <a class="view-all-btn row-title-link" href="./airing-today.html">View All</a>
           <div class="row-actions">
             <button id="airingTodayPrevBtn" class="arrow-btn" type="button" aria-label="Scroll airing today left">&#8592;</button>
             <button id="airingTodayNextBtn" class="arrow-btn" type="button" aria-label="Scroll airing today right">&#8594;</button>
@@ -414,6 +419,6 @@
       })();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.min.js"></script>
-    <script type="module" src="app.js?v=20260513-fixes1"></script>
+    <script type="module" src="app.js?v=20260515-bugfix2"></script>
   </body>
 </html>

@@ -1,5 +1,48 @@
-const STATIC_CACHE = "cinerune-static-v36-20260513-fixes1";
-const ASSETS = ["./", "./index.html", "./watch.html", "./lists.html", "./browse.html", "./search.html", "./top-rated.html", "./inbox.html", "./styles.css", "./app.js", "./watch.js", "./lists.js", "./browse.js", "./search.js", "./top-rated.js", "./inbox.js", "./notifications.js", "./drag-scroll.js", "./shared-ui.js", "./ui-toast.js", "./auth-client.js", "./catalog.js", "./config.js", "./favicon.svg"];
+const STATIC_CACHE = "cinerune-static-v40-20260522-watch-notifications";
+const ASSETS = [
+  "./",
+  "./index.html",
+  "./watch.html",
+  "./lists.html",
+  "./browse.html",
+  "./search.html",
+  "./top-rated.html",
+  "./recommended.html",
+  "./trending.html",
+  "./popular.html",
+  "./airing-today.html",
+  "./inbox.html",
+  "./styles.css",
+  "./app.js",
+  "./watch.js",
+  "./lists.js",
+  "./browse.js",
+  "./search.js",
+  "./top-rated.js",
+  "./recommended.js",
+  "./trending.js",
+  "./popular.js",
+  "./airing-today.js",
+  "./inbox.js",
+  "./notifications.js",
+  "./drag-scroll.js",
+  "./shared-ui.js",
+  "./shared-state.js",
+  "./shared-utils.js",
+  "./bookmark-sync.js",
+  "./progress-sync.js",
+  "./ui-toast.js",
+  "./auth-client.js",
+  "./catalog.js",
+  "./config.js",
+  "./favicon.svg",
+  "./avatars/ironman.png",
+  "./avatars/goku.jpg",
+  "./avatars/darthvader.jpg",
+  "./avatars/tonysoprano.jpg",
+  "./avatars/luffy.jpg",
+  "./avatars/walterwhite.jpg"
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -28,7 +71,44 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
 
   if (url.origin === self.location.origin) {
-    const appShellPaths = new Set(["/", "/index.html", "/watch.html", "/lists.html", "/browse.html", "/search.html", "/top-rated.html", "/inbox.html", "/styles.css", "/app.js", "/watch.js", "/lists.js", "/browse.js", "/search.js", "/top-rated.js", "/inbox.js", "/notifications.js", "/drag-scroll.js", "/shared-ui.js", "/ui-toast.js", "/auth-client.js", "/catalog.js", "/config.js", "/favicon.svg"]);
+    const appShellPaths = new Set([
+      "/",
+      "/index.html",
+      "/watch.html",
+      "/lists.html",
+      "/browse.html",
+      "/search.html",
+      "/top-rated.html",
+      "/recommended.html",
+      "/trending.html",
+      "/popular.html",
+      "/airing-today.html",
+      "/inbox.html",
+      "/styles.css",
+      "/app.js",
+      "/watch.js",
+      "/lists.js",
+      "/browse.js",
+      "/search.js",
+      "/top-rated.js",
+      "/recommended.js",
+      "/trending.js",
+      "/popular.js",
+      "/airing-today.js",
+      "/inbox.js",
+      "/notifications.js",
+      "/drag-scroll.js",
+      "/shared-ui.js",
+      "/shared-state.js",
+      "/shared-utils.js",
+      "/bookmark-sync.js",
+      "/progress-sync.js",
+      "/ui-toast.js",
+      "/auth-client.js",
+      "/catalog.js",
+      "/config.js",
+      "/favicon.svg"
+    ]);
     const networkFirst = appShellPaths.has(url.pathname);
 
     if (networkFirst) {
