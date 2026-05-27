@@ -51,7 +51,6 @@ async function boot() {
 
   if (!term) {
     el.searchPageTitle.textContent = "Search";
-    el.searchPageStatus.textContent = "Search for a movie or show.";
     el.searchResultsHead?.setAttribute("hidden", "");
     el.searchPageGrid.innerHTML = "";
     renderPagination("", 1, 1);
