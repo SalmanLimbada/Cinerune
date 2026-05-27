@@ -2,10 +2,22 @@ const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT_MAX_BY_ACTION = {
   login: 10,
-  signup: 30
+  signup: 30,
+  forgot: 5
 };
 const MAX_BODY_BYTES = 65536;
 const AUTH_RATE_LIMIT_DISABLED_VALUE = "true";
+const REQUEST_ALIAS_CACHE = new WeakMap();
+
+function getRequestAliasCache(request) {
+  if (!request) return null;
+  let cache = REQUEST_ALIAS_CACHE.get(request);
+  if (!cache) {
+    cache = new Map();
+    REQUEST_ALIAS_CACHE.set(request, cache);
+  }
+  return cache;
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -216,7 +228,7 @@ async function handleAuthLogin(request, env) {
     const text = await response.text();
     if (response.ok) {
       if (!identifier.includes("@") && isInternalEmail(email)) {
-        await storeLoginAliases(env, identifier, email);
+        await storeLoginAliases(env, identifier, email, request);
       }
       return jsonProxyFromText(text, response.status);
     }
@@ -281,7 +293,7 @@ async function handleAuthSignup(request, env) {
     ? await createInternalSupabaseUser(env, signupPayload)
     : await proxySupabaseAuth(env, "/auth/v1/signup", signupPayload);
   if (response.ok) {
-    await storeLoginAliases(env, username, loginEmail);
+    await storeLoginAliases(env, username, loginEmail, request);
   }
   return response;
 }
@@ -356,7 +368,7 @@ async function handleAuthMe(request, env) {
   }
 
   if (user.user_metadata?.username && user.email) {
-    await storeLoginAliases(env, user.user_metadata.username, user.email);
+    await storeLoginAliases(env, user.user_metadata.username, user.email, request);
   }
 
   return jsonResponse({ user });
@@ -371,6 +383,16 @@ async function handleAuthForgot(request, env) {
   const identifier = normalizeIdentifier(payload?.identifier);
   if (!identifier) {
     return jsonResponse({ ok: true });
+  }
+
+  if (!shouldBypassAuthRateLimit(env, request)) {
+    const limiterKey = buildLimiterKey(request, "forgot", identifier);
+    const limited = await checkRateLimit(env, limiterKey, RATE_LIMIT_MAX_BY_ACTION.forgot);
+    if (limited.blocked) {
+      return jsonResponse({ error: "Too many attempts. Try again later." }, 429, {
+        "Retry-After": String(limited.retryAfter)
+      });
+    }
   }
 
   const emails = await resolveLoginEmails(env, identifier);
@@ -599,7 +621,7 @@ async function handleAuthUpdate(request, env) {
   const confirmedEmail = normalizeEmail(supabasePayload.email, false);
   if (supabaseResponse.ok && update.email && confirmedEmail !== update.email) {
     if (username) {
-      await storeLoginAliases(env, username, currentUser.email);
+      await storeLoginAliases(env, username, currentUser.email, request);
     }
     return jsonResponse({
       ok: true,
@@ -624,7 +646,8 @@ async function handleAuthUpdate(request, env) {
     await storeLoginAliases(
       env,
       username || currentUser.user_metadata?.username,
-      aliasEmail
+      aliasEmail,
+      request
     );
   }
   return response;
@@ -1372,14 +1395,27 @@ async function getLoginAlias(env, username) {
   }
 }
 
-async function storeLoginAliases(env, username, email) {
+async function storeLoginAliases(env, username, email, request) {
   const normalizedUsername = normalizeUsername(username);
   const normalizedEmail = normalizeEmail(email, false);
   if (!env.RATE_LIMIT_KV?.put || !normalizedUsername || !normalizedEmail) return;
+  const cache = getRequestAliasCache(request);
+  if (cache?.has(normalizedUsername)) {
+    if (cache.get(normalizedUsername) === normalizedEmail) return;
+  } else if (env.RATE_LIMIT_KV?.get) {
+    try {
+      const existing = await env.RATE_LIMIT_KV.get(loginAliasKey(normalizedUsername));
+      if (existing === normalizedEmail) return;
+    } catch {
+      // Fall through to attempt the write if reads are unavailable.
+    }
+  }
   try {
     await env.RATE_LIMIT_KV.put(loginAliasKey(normalizedUsername), normalizedEmail);
   } catch {
     // Login can still proceed with Supabase auth if KV alias caching is temporarily unavailable.
+  } finally {
+    cache?.set(normalizedUsername, normalizedEmail);
   }
 }
 

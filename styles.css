@@ -1667,6 +1667,7 @@ html {
   justify-content: center;
   min-height: 1.65rem;
   line-height: 1;
+  text-decoration: none;
 }
 
 .notifications-list {

@@ -1011,13 +1011,6 @@ async function onPlayerMessage(event) {
   if (!hasPlaybackSignal) return;
   const existing = state.progress[key] || null;
 
-  if (!state.playerSupportsCommands) {
-    state.playerSupportsCommands = true;
-    if (state.resumeMode && state.resumeTarget > 0 && !state.resumeConfirmed && state.resumeSeekAttempts === 0) {
-      scheduleResumeSeek(true);
-    }
-  }
-
   if (
     existing
     && eventType !== "ended"
@@ -1027,6 +1020,13 @@ async function onPlayerMessage(event) {
     && !state.serverSwitchInProgress
   ) {
     return;
+  }
+
+  if (!state.playerSupportsCommands) {
+    state.playerSupportsCommands = true;
+    if (state.resumeMode && state.resumeTarget > 0 && !state.resumeConfirmed && state.resumeSeekAttempts === 0) {
+      scheduleResumeSeek(true);
+    }
   }
 
   state.lastPlayerEventAt = Date.now();

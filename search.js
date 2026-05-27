@@ -18,6 +18,7 @@ const el = {
   searchPageTitle: document.getElementById("searchPageTitle"),
   searchPageInput: document.getElementById("searchPageInput"),
   searchPageStatus: document.getElementById("searchPageStatus"),
+  searchResultsHead: document.getElementById("searchResultsHead"),
   searchPageGrid: document.getElementById("searchPageGrid"),
   searchPagePagination: document.getElementById("searchPagePagination"),
   posterCardTemplate: document.getElementById("posterCardTemplate")
@@ -51,6 +52,7 @@ async function boot() {
   if (!term) {
     el.searchPageTitle.textContent = "Search";
     el.searchPageStatus.textContent = "Search for a movie or show.";
+    el.searchResultsHead?.setAttribute("hidden", "");
     el.searchPageGrid.innerHTML = "";
     renderPagination("", 1, 1);
     return;
@@ -59,6 +61,7 @@ async function boot() {
   saveSharedRecentSearch(term);
   el.searchPageTitle.textContent = `Search: ${term}`;
   el.searchPageStatus.textContent = "Loading results...";
+  el.searchResultsHead?.removeAttribute("hidden");
   renderSkeletonCards(el.searchPageGrid, 21);
 
   try {
@@ -68,7 +71,7 @@ async function boot() {
     renderPagination(term, displayPage, totalPages || 1);
     el.searchPageTitle.textContent = `Search: ${term}`;
     el.searchPageStatus.textContent = ranked.length
-      ? `Page ${displayPage} of ${Math.max(1, Number(totalPages || 1))} for "${term}".`
+      ? `Results for "${term}".`
       : `No results found for "${term}".`;
   } catch {
     renderPosterCards([]);

@@ -68,11 +68,7 @@ async function boot() {
   initSharedHeader();
   initConfiguredTmdb();
   el.browseBackBtn?.addEventListener("click", () => {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      window.location.href = "./index.html";
-    }
+    window.location.href = buildBrowseRootHref();
   });
   el.browseBackBtn?.toggleAttribute("hidden", !selectedValue);
   activeProgress = await loadActiveProgress();
@@ -265,6 +261,12 @@ function buildBrowseHref(nextPage, nextType = mediaType) {
 function bindTypeToggle() {
   el.browseMoviesLink?.addEventListener("click", () => setMediaType("movie"));
   el.browseTvLink?.addEventListener("click", () => setMediaType("tv"));
+}
+
+function buildBrowseRootHref() {
+  const url = new URL("./browse.html", window.location.href);
+  url.searchParams.set("mode", mode === "country" ? "country" : "genre");
+  return url.toString();
 }
 
 async function setMediaType(nextType) {

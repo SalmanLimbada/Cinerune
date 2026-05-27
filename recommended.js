@@ -24,6 +24,13 @@ boot();
 async function boot() {
   initSharedHeader();
   initConfiguredTmdb();
+  document.getElementById("pageBackBtn")?.addEventListener("click", () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.location.href = "./index.html";
+    }
+  });
   activeProgress = loadActiveProgress();
   renderSkeletonCards(el.grid, PAGE_SIZE);
 

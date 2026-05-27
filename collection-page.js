@@ -28,6 +28,7 @@ export async function initCollectionPage(config) {
     status: document.getElementById("collectionStatus"),
     grid: document.getElementById("collectionGrid"),
     pagination: document.getElementById("collectionPagination"),
+    backBtn: document.getElementById("pageBackBtn"),
     moviesLink: document.getElementById("collectionMoviesLink"),
     tvLink: document.getElementById("collectionTvLink"),
     posterCardTemplate: document.getElementById("posterCardTemplate")
@@ -35,6 +36,9 @@ export async function initCollectionPage(config) {
 
   initSharedHeader();
   initConfiguredTmdb();
+  el.backBtn?.addEventListener("click", () => {
+    window.location.href = "./index.html";
+  });
   bindTypeToggle();
   bindPagination();
   await setMediaType(mediaType, { replace: true });
